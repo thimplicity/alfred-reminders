@@ -9,6 +9,8 @@ does the current query string look like":
   menu:<id>           reached via Tab              -> action menu for one item
   edit:<id>:<text>     reached via the menu         -> retitle, typing <text>
   due:<id>:<text>      reached via the menu         -> reschedule, typing <text>
+  movelist:<id>:<text> reached via the menu         -> move, picking a list
+  view:<id>            reached via the menu         -> read-only detail screen
 
 Browse-mode scope grammar (all optional, space separated):
   rem                     -> due today + overdue (remctl today)
@@ -31,15 +33,19 @@ selecting one (Return, since these are `valid: false` items with an
 `autocomplete`) fills in the exact name and re-renders that scope
 immediately. See render_list_picker()/render_tag_picker().
 
-Row modifiers in browse mode: Return=open, Shift=complete,
-Ctrl+Option+Cmd=delete (all fast paths that need no further input). Tab
-drills into the action menu, which is also where edit/reschedule/move
-live, since those need a follow-up text entry or picker that a
-modifier+Return can't provide (a modifier is a one-shot fire, not an
+Row modifiers in browse mode: Return=open, Shift=complete (fast paths
+that need no further input; there's no delete anywhere in this workflow —
+use Reminders.app for that). Tab drills into the action menu, which is
+also where reschedule/change-title/move/view-details live, since those
+need a follow-up text entry, picker, or just more screen space than a
+modifier+Return can provide (a modifier is a one-shot fire, not an
 interactive prompt). Per Alfred's own docs, an item's "autocomplete" field
 is a Tab-triggered behavior specifically — an earlier version of this
 workflow incorrectly documented Right Arrow as equivalent, which it isn't
-for a plain Script Filter item.
+for a plain Script Filter item. Right Arrow itself is a fixed Alfred
+behavior tied only to native file/folder results ("Show list of available
+Actions... in File System Navigation" per Alfred's cheatsheet) — it isn't
+available to hook into for a custom Script Filter's own results at all.
 """
 import datetime as dt
 import json
@@ -61,6 +67,7 @@ MENU_RE = re.compile(r"^menu:(\d+)$")
 EDIT_RE = re.compile(r"^edit:(\d+):(.*)$", re.DOTALL)
 DUE_RE = re.compile(r"^due:(\d+):(.*)$", re.DOTALL)
 MOVE_RE = re.compile(r"^movelist:(\d+):(.*)$", re.DOTALL)
+VIEW_RE = re.compile(r"^view:(\d+)$")
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +413,7 @@ MENU_ACTIONS = [
     ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am", False),
     ("Change title…", None, "edit", "type a new title, or add #tag to tag it", True),
     ("Move to another list…", None, "movelist", "type or pick a list", False),
+    ("View details", None, "view", "see notes, priority, flag, and tags", None),
     ("Open in Reminders.app", "open", None, None, False),
 ]
 
@@ -431,6 +439,15 @@ def render_menu(reminder_id):
                     "reminder_title": title,
                 },
             })
+        elif prefill_title is None:
+            # View details is direct navigation, not a text-entry drill —
+            # no trailing ":text" slot to fill in.
+            items.append({
+                "title": label,
+                "subtitle": f"“{title}” — {hint}",
+                "valid": False,
+                "autocomplete": f"{drill_prefix}:{reminder_id}",
+            })
         else:
             # Change-title prefills the current title so adding a #tag (or
             # a small tweak) doesn't require retyping the whole thing —
@@ -444,6 +461,36 @@ def render_menu(reminder_id):
                 "autocomplete": f"{drill_prefix}:{reminder_id}:{prefill}",
             })
     return {"items": items}
+
+
+def render_view(reminder_id):
+    try:
+        info = run(["info", reminder_id], json_output=True)
+    except RemctlError as exc:
+        return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
+
+    title = info.get("title") or f"#{reminder_id}"
+    base_vars = {"reminder_id": reminder_id, "reminder_title": title, "action": "open"}
+
+    lines = [
+        ("Title", title),
+        ("List", info.get("list") or "—"),
+        ("Due", humanize_due(info)),
+        ("Priority", (info.get("priority") or "none").capitalize()),
+        ("Flagged", "Yes" if info.get("flagged") else "No"),
+        ("Tags", ", ".join(info.get("tags") or []) or "none"),
+        ("Notes", info.get("notes") or "none"),
+    ]
+    return {"items": [
+        {
+            "title": f"{label}: {value}",
+            "subtitle": "↩ to open in Reminders.app",
+            "arg": reminder_id,
+            "valid": True,
+            "variables": dict(base_vars),
+        }
+        for label, value in lines
+    ]}
 
 
 def render_move_picker(reminder_id, partial):
@@ -514,6 +561,11 @@ def main():
             print(json.dumps(render_move_picker(reminder_id, typed)))
         except RemctlError as exc:
             print(json.dumps({"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}))
+        return
+
+    view_match = VIEW_RE.match(query)
+    if view_match:
+        print(json.dumps(render_view(view_match.group(1))))
         return
 
     print(json.dumps(render_browse(query)))
