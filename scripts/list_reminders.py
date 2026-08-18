@@ -394,7 +394,7 @@ def render_browse(query):
     if not alfred_items:
         alfred_items = [{
             "title": "No matching reminders",
-            "subtitle": "Try a different list (#Name), \"all\", or search text",
+            "subtitle": "Try a different list (@Name), tag (#tag), \"all\", or search text",
             "valid": False,
         }]
     return {"items": alfred_items}
