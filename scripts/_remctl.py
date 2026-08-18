@@ -141,9 +141,12 @@ _DUE_UNIT_WORDS = {
     "day", "days", "week", "weeks", "month", "months",
     "hour", "hours", "minute", "minutes", "min", "mins",
 }
-# Deliberately excludes ambiguous standalone words like "morning"/"night" —
-# too likely to be the last word of an ordinary title ("Movie night").
 _DUE_TIME_ANCHOR_WORDS = {"am", "pm", "noon", "midnight", "eod"}
+# Time-of-day words are only ever a *weak* signal on their own — "Movie
+# night" is a perfectly ordinary title — but they still need to be
+# recognized so the scan doesn't stop dead on them before reaching a real
+# anchor earlier in the phrase, e.g. "tomorrow morning", "Friday evening".
+_DUE_DAYPART_WORDS = {"morning", "afternoon", "evening", "night"}
 _TIME_RE = re.compile(r"\d{1,2}:\d{2}(am|pm)?$")
 _HOUR_RE = re.compile(r"\d{1,2}(am|pm)$")
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}$")
@@ -156,10 +159,12 @@ def _due_token_kind(tok):
     plausibly belong to a trailing date/time phrase at all.
 
     "anchor" tokens are concrete enough to stand alone (a weekday, "9am",
-    an ISO date, ...). "modifier" ("in", "next", "at", ...) and "unit"
-    ("days", "week", ...) tokens only count as part of a due phrase in
-    combination — see split_implicit_due() — so that a title ending in a
-    single stray preposition ("Check in", "Read on") isn't misread as one.
+    an ISO date, ...). "modifier" ("in", "next", "at", ...), "unit"
+    ("days", "week", ...), and "daypart" ("morning", "night", ...) tokens
+    only count as part of a due phrase in combination with an anchor or
+    each other — see split_implicit_due() — so that a title ending in a
+    single stray preposition ("Check in", "Read on") or a bare time-of-day
+    word ("Movie night") isn't misread as one.
     """
     low = tok.lower().strip(",.")
     if low in _DUE_WEEKDAYS or low in _DUE_DAY_WORDS or low in _DUE_TIME_ANCHOR_WORDS:
@@ -170,6 +175,8 @@ def _due_token_kind(tok):
         return "unit"
     if low in _DUE_MODIFIER_WORDS:
         return "modifier"
+    if low in _DUE_DAYPART_WORDS:
+        return "daypart"
     if _BARE_INT_RE.fullmatch(low):
         return "number"
     return None
@@ -185,11 +192,15 @@ def split_implicit_due(tokens):
     Returns (title_tokens, due_tokens). Only actually splits if the
     candidate suffix contains a concrete "anchor" (a weekday, "9am", an ISO
     date, ...) or a modifier/unit pairing that only makes sense together
-    ("in 3 days", "next week") — a bare trailing modifier or unit word
-    alone ("Check in", "Read on") is left as part of the title instead of
-    being misread as a due phrase. Always leaves at least one token as the
-    title even when the whole query looks date-like, so a title that's
-    just "Tomorrow" doesn't turn into an empty-title reminder.
+    ("in 3 days", "next week") — a bare trailing modifier, unit, or
+    time-of-day word alone ("Check in", "Read on", "Movie night") is left
+    as part of the title instead of being misread as a due phrase. Daypart
+    words ("morning", "evening", ...) still extend the scan so a real
+    anchor earlier in the phrase isn't missed ("tomorrow morning", "Friday
+    evening" both still work), they just don't count as an anchor by
+    themselves. Always leaves at least one token as the title even when
+    the whole query looks date-like, so a title that's just "Tomorrow"
+    doesn't turn into an empty-title reminder.
     """
     i = len(tokens)
     kinds = []
