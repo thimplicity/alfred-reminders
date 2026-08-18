@@ -22,17 +22,21 @@ small.
 `/bin/bash`-interpreted command line, so without escaping configured, a
 query containing shell metacharacters would have that command executed by
 bash before Python ever starts, under Alfred's own permissions. Two
-reachable paths on this branch: **Change title…** prefills a reminder's
-current title into `autocomplete` (`render_menu()` in
-`scripts/list_reminders.py`), so a title containing `$(command)` —
-plausible from a collaborator on a shared list — would trigger this the
-moment you select that menu entry; the `@`/`#` picker's `autocomplete`
-values are similarly built from list/tag names, which a shared-list
-collaborator can also rename. All four script objects (`rem` and `remadd`
-Script Filters, both Run Scripts) set `escaping: 102` — verified against a
-deanishe benchmark plist built for exactly this class of input, and
-against real third-party workflows on this machine using the same value
-for the same `"{query}"`-in-shell-argument pattern — to escape
+reachable paths on this branch, both requiring a selection, not just
+typing — **Change title…** prefills a reminder's current title into
+`autocomplete` (`render_menu()` in `scripts/list_reminders.py`), so a
+title containing `$(command)` — plausible from a collaborator on a shared
+list — would reach `{query}` once you select that menu entry (Tab); the
+`@`/`#` picker's `autocomplete` values are similarly built from list/tag
+names (`render_list_picker()`/`render_tag_picker()`), which a shared-list
+collaborator can also rename — typing `rem @` alone only renders the
+picker entry, it's selecting it (Tab) that puts the name into `{query}`
+on the *next* invocation, the point bash actually evaluates it. All four
+script objects (`rem` and `remadd` Script Filters, both Run Scripts) set
+`escaping: 102` — verified against a deanishe benchmark plist built for
+exactly this class of input, and against real third-party workflows on
+this machine using the same value for the same
+`"{query}"`-in-shell-argument pattern — to escape
 backquotes/dollars/double-quotes/backslashes before substitution. If you
 ever add a new script object with `"{query}"` in it, set this too.
 
