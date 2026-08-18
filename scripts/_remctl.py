@@ -142,6 +142,10 @@ _DUE_UNIT_WORDS = {
     "hour", "hours", "minute", "minutes", "min", "mins",
 }
 _DUE_TIME_ANCHOR_WORDS = {"am", "pm", "noon", "midnight", "eod"}
+# "at"/"by" specifically license a bare hour right after them ("at 9",
+# "by 5") — the other modifiers ("in", "next", "on", ...) don't naturally
+# precede a bare hour the same way, so they're deliberately excluded here.
+_HOUR_MODIFIER_WORDS = {"at", "by"}
 # Time-of-day words are only ever a *weak* signal on their own — "Movie
 # night" is a perfectly ordinary title — but they still need to be
 # recognized so the scan doesn't stop dead on them before reaching a real
@@ -198,8 +202,14 @@ def split_implicit_due(tokens):
     words ("morning", "evening", ...) still extend the scan so a real
     anchor earlier in the phrase isn't missed ("tomorrow morning", "Friday
     evening" both still work), they just don't count as an anchor by
-    themselves. Always leaves at least one token as the title even when
-    the whole query looks date-like, so a title that's just "Tomorrow"
+    themselves. A bare number only extends the scan when it's immediately
+    *followed* by a unit word ("in 3 days") or immediately *preceded* by
+    "at"/"by" ("tomorrow at 9", "by 5") — otherwise it's almost always just
+    part of the title ("Test 2", "Room 5") and shouldn't get pulled into a
+    due phrase just because an unrelated anchor happens to follow it
+    ("Test 2 tomorrow" must stay title="Test 2", due="tomorrow", not
+    due="2 tomorrow"). Always leaves at least one token as the title even
+    when the whole query looks date-like, so a title that's just "Tomorrow"
     doesn't turn into an empty-title reminder.
     """
     i = len(tokens)
@@ -208,6 +218,13 @@ def split_implicit_due(tokens):
         kind = _due_token_kind(tokens[i - 1])
         if kind is None:
             break
+        if kind == "number":
+            followed_by_unit = bool(kinds) and kinds[-1] == "unit"
+            preceded_by_hour_modifier = (
+                tokens[i - 2].lower().strip(",.") in _HOUR_MODIFIER_WORDS
+            )
+            if not (followed_by_unit or preceded_by_hour_modifier):
+                break
         kinds.append(kind)
         i -= 1
     kinds.reverse()
