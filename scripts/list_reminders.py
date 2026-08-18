@@ -331,20 +331,29 @@ def build_browse_item(item):
     title = item.get("title") or "(untitled)"
     base_vars = {"reminder_id": reminder_id, "reminder_title": title}
 
-    return {
+    result = {
         "uid": reminder_id,
         "title": title,
         "subtitle": build_subtitle(item),
         "arg": reminder_id,
         "autocomplete": f"menu:{reminder_id}",
         "variables": dict(base_vars, action="open"),
-        "mods": {
+    }
+    # A modifier fires its variables immediately on Return — there's no
+    # autocomplete-style drill-in for mods, so Shift+Return can't be routed
+    # through the confirm step the way the menu's "Mark as complete" can.
+    # Omit the shortcut entirely while confirmation is on, rather than
+    # silently bypass the "every mutation gets reviewed" guarantee; Tab
+    # into the menu instead. Shift falls back to the default (open) action
+    # when omitted, same as any other unhandled modifier.
+    if not confirm_enabled():
+        result["mods"] = {
             "shift": {
                 "subtitle": f"Complete “{title}”",
                 "variables": dict(base_vars, action="done"),
             },
-        },
-    }
+        }
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +514,7 @@ def render_move_picker(reminder_id, partial):
         return {"items": [
             {
                 "title": name,
-                "subtitle": "↩ or Tab to review before confirming",
+                "subtitle": "Tab to review before confirming",
                 "valid": False,
                 "autocomplete": f"confirm:move:{reminder_id}:{name}",
             }
@@ -550,7 +559,7 @@ def render_text_input(reminder_id, action, typed_text, prompt_hint):
     if typed_text and confirm_enabled():
         item = {
             "title": typed_text,
-            "subtitle": "↩ or Tab to review before confirming",
+            "subtitle": "Tab to review before confirming",
             "valid": False,
             "autocomplete": f"confirm:{action}:{reminder_id}:{typed_text}",
         }

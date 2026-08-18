@@ -54,6 +54,8 @@
 				<integer>0</integer>
 				<key>argumenttype</key>
 				<integer>1</integer>
+				<key>escaping</key>
+				<integer>102</integer>
 			</dict>
 		</dict>
 		<dict>
@@ -68,7 +70,7 @@
 				<key>concurrently</key>
 				<false/>
 				<key>escaping</key>
-				<integer>0</integer>
+				<integer>102</integer>
 				<key>script</key>
 				<string>/usr/bin/python3 scripts/reminder_action.py "{query}"</string>
 				<key>scriptargtype</key>
@@ -104,6 +106,8 @@
 				<integer>0</integer>
 				<key>argumenttype</key>
 				<integer>1</integer>
+				<key>escaping</key>
+				<integer>102</integer>
 			</dict>
 		</dict>
 		<dict>
@@ -118,7 +122,7 @@
 				<key>concurrently</key>
 				<false/>
 				<key>escaping</key>
-				<integer>0</integer>
+				<integer>102</integer>
 				<key>script</key>
 				<string>/usr/bin/python3 scripts/quick_add.py "{query}"</string>
 				<key>scriptargtype</key>

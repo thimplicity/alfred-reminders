@@ -74,7 +74,7 @@ def render_tag_completion(query, partial):
     return {"items": [
         {
             "title": f"#{tag}",
-            "subtitle": "Tab or Return to use this tag and keep typing",
+            "subtitle": "Tab to use this tag and keep typing",
             "valid": False,
             "autocomplete": replace_last_token(query, f"#{tag}"),
         }
@@ -98,7 +98,7 @@ def render_list_completion(query, partial):
     return {"items": [
         {
             "title": name,
-            "subtitle": "Tab or Return to pick this list and keep typing",
+            "subtitle": "Tab to pick this list and keep typing",
             "valid": False,
             "autocomplete": replace_last_token(query, f"@{name}"),
         }
@@ -118,7 +118,7 @@ def render_priority_completion(query, partial):
     return {"items": [
         {
             "title": f"!{p}",
-            "subtitle": f"{p.capitalize()} priority — Tab or Return to pick and keep typing",
+            "subtitle": f"{p.capitalize()} priority — Tab to pick and keep typing",
             "valid": False,
             "autocomplete": replace_last_token(query, f"!{p}"),
         }
