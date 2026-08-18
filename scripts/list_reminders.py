@@ -56,6 +56,7 @@ CACHE_TTL = 5  # seconds; only applies to scope-level fetches, not free text
 MENU_RE = re.compile(r"^menu:(\d+)$")
 EDIT_RE = re.compile(r"^edit:(\d+):(.*)$", re.DOTALL)
 DUE_RE = re.compile(r"^due:(\d+):(.*)$", re.DOTALL)
+MOVE_RE = re.compile(r"^movelist:(\d+):(.*)$", re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
@@ -401,11 +402,12 @@ def render_browse(query):
 
 
 MENU_ACTIONS = [
-    ("Open in Reminders.app", "open", None),
-    ("Complete", "done", None),
-    ("Edit title…", None, "edit"),
-    ("Reschedule…", None, "due"),
-    ("Delete — cannot be undone", "delete", None),
+    ("Open in Reminders.app", "open", None, None),
+    ("Complete", "done", None, None),
+    ("Edit title…", None, "edit", "type a new title"),
+    ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am"),
+    ("Move to list…", None, "movelist", "type or pick a list"),
+    ("Delete — cannot be undone", "delete", None, None),
 ]
 
 
@@ -417,7 +419,7 @@ def render_menu(reminder_id):
 
     title = info.get("title") or f"#{reminder_id}"
     items = []
-    for label, action, drill_prefix in MENU_ACTIONS:
+    for label, action, drill_prefix, hint in MENU_ACTIONS:
         if action:
             items.append({
                 "title": label,
@@ -433,11 +435,41 @@ def render_menu(reminder_id):
         else:
             items.append({
                 "title": label,
-                "subtitle": f"“{title}” — {'type a new title' if drill_prefix == 'edit' else 'type a due date, e.g. tomorrow 9am'}",
+                "subtitle": f"“{title}” — {hint}",
                 "valid": False,
                 "autocomplete": f"{drill_prefix}:{reminder_id}:",
             })
     return {"items": items}
+
+
+def render_move_picker(reminder_id, partial):
+    """Unlike edit/reschedule, moving a reminder doesn't need a free-text
+    confirm step — picking a list name from the (live-filtered) options is
+    itself the complete action, so matches are `valid: true` here rather
+    than another drill-in. Smart lists are excluded since they're filtered
+    views, not real containers a reminder can be moved into.
+    """
+    needle = partial.lower()
+    matches = sorted(
+        name for name, kind in fetch_list_and_smart_list_names()
+        if kind == "List" and needle in name.lower()
+    )
+    if not matches:
+        return {"items": [{
+            "title": f'No list matches "{partial}"' if partial else "No lists found",
+            "subtitle": "Keep typing, or check the name in Reminders.app",
+            "valid": False,
+        }]}
+    return {"items": [
+        {
+            "title": name,
+            "subtitle": "Move here",
+            "arg": name,
+            "valid": True,
+            "variables": {"action": "move", "reminder_id": reminder_id},
+        }
+        for name in matches
+    ]}
 
 
 def render_text_input(reminder_id, action, typed_text, prompt_hint):
@@ -469,6 +501,15 @@ def main():
     if due_match:
         reminder_id, typed = due_match.group(1), due_match.group(2)
         print(json.dumps(render_text_input(reminder_id, "reschedule", typed, "a due date, e.g. tomorrow 9am")))
+        return
+
+    move_match = MOVE_RE.match(query)
+    if move_match:
+        reminder_id, typed = move_match.group(1), move_match.group(2)
+        try:
+            print(json.dumps(render_move_picker(reminder_id, typed)))
+        except RemctlError as exc:
+            print(json.dumps({"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}))
         return
 
     print(json.dumps(render_browse(query)))

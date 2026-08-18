@@ -198,8 +198,13 @@ def split_implicit_due(tokens):
     words ("morning", "evening", ...) still extend the scan so a real
     anchor earlier in the phrase isn't missed ("tomorrow morning", "Friday
     evening" both still work), they just don't count as an anchor by
-    themselves. Always leaves at least one token as the title even when
-    the whole query looks date-like, so a title that's just "Tomorrow"
+    themselves. A bare number only extends the scan when it's immediately
+    followed by a unit word ("in 3 days") — otherwise it's almost always
+    just part of the title ("Test 2", "Room 5") and shouldn't get pulled
+    into a due phrase just because an unrelated anchor happens to follow it
+    ("Test 2 tomorrow" must stay title="Test 2", due="tomorrow", not
+    due="2 tomorrow"). Always leaves at least one token as the title even
+    when the whole query looks date-like, so a title that's just "Tomorrow"
     doesn't turn into an empty-title reminder.
     """
     i = len(tokens)
@@ -207,6 +212,8 @@ def split_implicit_due(tokens):
     while i > 1:
         kind = _due_token_kind(tokens[i - 1])
         if kind is None:
+            break
+        if kind == "number" and (not kinds or kinds[-1] != "unit"):
             break
         kinds.append(kind)
         i -= 1

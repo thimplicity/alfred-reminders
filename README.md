@@ -107,16 +107,31 @@ not exhaustively against every filter kind Reminders supports.
 | ⌃⌥⌘ Return | Delete (no undo) |
 | → (Right Arrow) or Tab | Open the action menu for that reminder |
 
-The action menu (Open / Complete / Edit title / Reschedule / Delete) is
-where editing and rescheduling live, rather than on a modifier key —
-retitling or rescheduling both need you to type a follow-up value, and a
+The action menu (Open / Complete / Edit title / Reschedule / Move to list /
+Delete) is where editing, rescheduling, and moving live, rather than on a
+modifier key — all three need you to type or pick a follow-up value, and a
 modifier+Return is a one-shot fire-and-forget action with no way to open a
-text box afterward. Right Arrow into the menu, then Right Arrow or Return
-on "Edit title…" / "Reschedule…" drops you into a text-entry prompt (Left
-Arrow to back out, same as any Alfred drill-down).
+text box or picker afterward. Right Arrow into the menu, then Right Arrow
+or Return on "Edit title…" / "Reschedule…" / "Move to list…" drops you
+into a text-entry prompt or picker (Left Arrow to back out, same as any
+Alfred drill-down).
 
 Reschedule accepts `tomorrow`, `tom`, `next friday`, `2026-06-01`, `clear`,
 etc. — same trailing-phrase parsing as `remadd`'s due-date detection below.
+"Move to list…" is a live-filtered picker over real lists only (not smart
+lists, since those are filtered views, not containers) — picking one
+completes the move immediately, no further typing needed.
+
+**Known limitation**: moving a reminder between lists calls `remctl edit
+ID -l LIST`, which is documented to fall back to a verified clone-delete
+when EventKit rejects a plain move across a list/container boundary. On
+at least one test machine this instead surfaces a raw
+`com.apple.reminderkit error -3002` — reproduced identically calling
+`remctl` directly (with and without `--private`), so it's a remctl/EventKit
+behavior on that Mac, not a bug in this workflow's scripts. If you hit this,
+it's worth checking whether it's specific to certain lists (e.g. Groceries)
+or all moves on your machine, and reporting to the remctl project if it's
+the latter.
 
 ### `remadd` — quick add
 
@@ -216,6 +231,7 @@ python3 list_reminders.py "milk"                          # search
 python3 list_reminders.py "menu:23880"                     # action menu for one reminder
 python3 list_reminders.py "edit:23880:New title"            # edit text-entry preview
 python3 list_reminders.py "due:23880:tom 9am"                # reschedule text-entry preview
+python3 list_reminders.py "movelist:23880:Gro"                 # move-to-list picker preview
 action=done reminder_id=23880 python3 reminder_action.py
 python3 quick_add.py "Buy milk @Groceries tomorrow 9am"
 ```
