@@ -6,7 +6,7 @@ this same script on every keystroke/navigation, so "mode" just means "what
 does the current query string look like":
 
   browse (default)   rem <scope> <text>          -> reminder list
-  menu:<id>           reached via Right Arrow      -> action menu for one item
+  menu:<id>           reached via Tab              -> action menu for one item
   edit:<id>:<text>     reached via the menu         -> retitle, typing <text>
   due:<id>:<text>      reached via the menu         -> reschedule, typing <text>
 
@@ -32,10 +32,14 @@ selecting one (Return, since these are `valid: false` items with an
 immediately. See render_list_picker()/render_tag_picker().
 
 Row modifiers in browse mode: Return=open, Shift=complete,
-Ctrl+Option+Cmd=delete (all fast paths that need no further input). Right
-Arrow/Tab drills into the action menu, which is also where edit/reschedule
-live, since those need a follow-up text entry that a modifier+Return can't
-provide (a modifier is a one-shot fire, not an interactive prompt).
+Ctrl+Option+Cmd=delete (all fast paths that need no further input). Tab
+drills into the action menu, which is also where edit/reschedule/move
+live, since those need a follow-up text entry or picker that a
+modifier+Return can't provide (a modifier is a one-shot fire, not an
+interactive prompt). Per Alfred's own docs, an item's "autocomplete" field
+is a Tab-triggered behavior specifically — an earlier version of this
+workflow incorrectly documented Right Arrow as equivalent, which it isn't
+for a plain Script Filter item.
 """
 import datetime as dt
 import json
