@@ -206,6 +206,20 @@ remadd <title words...> [@List] [#tag ...] [!priority] [<due phrase>] [notes:<te
   auto-detected, since free text can't be told apart from a due phrase by
   pattern alone
 
+**Live completion**: `remadd` is a Script Filter, so it re-renders on every
+keystroke. Whenever the word you're currently typing starts with `@`, `#`,
+or `!` (and you haven't closed it with a space yet), it shows matching
+lists, tags, or priorities instead of the usual preview — Tab or Return on
+one fills in just that word and puts the cursor back at the end so you
+keep typing the rest (`@Groceries `, then continue with `tomorrow 9am`).
+The `@` picker only offers single-word real lists (smart lists aren't
+valid add targets, and multi-word names aren't representable in this
+inline shorthand anyway). Once a word is closed with a space, normal
+preview mode resumes: the result becomes a live summary of everything
+parsed so far (title, list, tags, priority, due, notes), and Return adds
+the reminder at any point — you don't have to use a suggestion, typing a
+brand-new tag or a due phrase by hand works exactly as before.
+
 Examples:
 
 ```
@@ -224,7 +238,9 @@ A macOS notification confirms success or reports the failure.
       │ (Return / ⇧ / ⌃⌥⌘, default connection — the only connection)
       └──────────────────────────────▶ Run Script   scripts/reminder_action.py
 
-[remadd, keyword]  ──▶ Run Script       scripts/quick_add.py
+[remadd, keyword]  Script Filter        scripts/quick_add_filter.py
+      │ (Return, default connection — the only connection)
+      └──────────────────────────────▶ Run Script   scripts/quick_add.py
 ```
 
 Two objects per keyword, one plain connection each — no modifier-gated
@@ -233,8 +249,13 @@ action menu, the edit/reschedule/move text-entry prompts and picker, the
 read-only details screen, *and* the confirm-step summary all in one
 script, branching on a prefix in the query string itself (`menu:<id>`,
 `edit:<id>:<text>`, `due:<id>:<text>`, `movelist:<id>:<text>`, `view:<id>`,
-`confirm:<action>:<id>:<value>` — see the module docstring). Only the
-terminal actions (open/complete/edit/reschedule/move) reach
+`confirm:<action>:<id>:<value>` — see the module docstring).
+`quick_add_filter.py` similarly handles both the `@`/`#`/`!` live
+completion and the running preview, but never calls `remctl` itself — its
+one valid output item's `arg` is the full query text, unchanged, which is
+what `quick_add_filter.py` was already parsing for the preview and is
+exactly what `quick_add.py` re-parses to actually create the reminder.
+Only the terminal actions (open/complete/edit/reschedule/move) reach
 `reminder_action.py`, which is the only script that actually calls
 `remctl` to mutate anything — `view:<id>` never does, it only reads.
 
@@ -295,6 +316,10 @@ python3 list_reminders.py "confirm:done:23880:"                    # confirm-ste
 CONFIRM_CHANGES=0 python3 list_reminders.py "edit:23880:New title"   # with confirm disabled
 action=done reminder_id=23880 python3 reminder_action.py
 python3 quick_add.py "Buy milk @Groceries tomorrow 9am"
+python3 quick_add_filter.py "Buy milk"                     # live preview
+python3 quick_add_filter.py "Buy milk @Ta"                   # list completion
+python3 quick_add_filter.py "Buy milk #wo"                    # tag completion
+python3 quick_add_filter.py "Buy milk !h"                      # priority completion
 ```
 
 ## Extending
