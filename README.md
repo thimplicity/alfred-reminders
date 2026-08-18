@@ -20,10 +20,16 @@ small.
 
 **Security note**: every script object that embeds `"{query}"` directly
 into a `/bin/bash`-interpreted command line needs escaping configured,
-otherwise a query containing shell metacharacters — e.g. a reminder title
-with `$(command)` in it, plausible from a shared-list collaborator — would
-have that command executed by bash before Python ever starts, under
-Alfred's own permissions. All three script-bearing objects that do this
+otherwise a query containing shell metacharacters would have that command
+executed by bash before Python ever starts, under Alfred's own
+permissions. Concretely reachable on this branch: the `@`/`#` picker's
+`autocomplete` values are built directly from list and tag names
+(`f"@{name}"` / `f"#{tag}"` in `render_list_picker()`/`render_tag_picker()`
+— see `scripts/list_reminders.py`), and a list can be renamed by anyone
+it's shared with over iCloud — a shared list renamed to `$(command)`
+would have that command executed the moment the local user types `rem @`
+and the picker embeds that name into the next query. All three
+script-bearing objects that do this
 (the `rem` Script Filter and both Run Scripts — `remadd`'s Keyword Input
 doesn't embed `{query}` in a script string at all, so it isn't affected)
 now set `escaping: 102` (verified against a deanishe benchmark plist built
