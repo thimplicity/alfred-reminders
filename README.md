@@ -66,18 +66,28 @@ structure" below; the scripts themselves don't change.
 |---|---|
 | `rem` (empty) | Due today + overdue |
 | `rem <text>` | Full-text search (title + notes) across all lists |
-| `rem #List` | Everything in one list — or one **smart list** (see below) |
+| `rem @List` | Everything in one list — or one **smart list** (see below) |
+| `rem #tag` | Every reminder with that tag, across all lists |
 | `rem all` | Every open reminder, across every list |
 | `rem all <text>` | Same, filtered by `<text>` |
 | `rem upcoming [N]` | Due within N days (default 7) |
 | `rem flagged` | Flagged reminders |
 | `rem overdue` | Overdue only |
 
-`#` claims the *rest* of the query as the name, so multi-word list/smart-list
-names work: `rem #Sometime - AI`, `rem #Don't Forget Me`.
+`@` claims the *rest* of the query as the name, so multi-word list/smart-list
+names work: `rem @Sometime - AI`, `rem @Don't Forget Me`. `#tag` is a single
+word (tags don't have spaces), and anything after it is a further free-text
+filter, same as `flagged`/`overdue`.
+
+**Live picker**: typing `@` or `#` with no exact match yet — rather than
+erroring on partial text — shows every list/smart-list or tag whose name
+contains what you've typed so far (`@` with nothing after it lists
+everything). Selecting one (Return) fills in the exact name and immediately
+shows that scope, since these are `autocomplete` items rather than an
+action — no separate confirm step needed.
 
 **Smart lists**: `remctl` can inspect a smart list's filter definition but
-has no command to fetch its live contents, so `#Name` tries a real list
+has no command to fetch its live contents, so `@Name` tries a real list
 first and, if none matches, looks up a smart list by that name and
 re-implements its filter (tags, date range, priority, flagged) client-side
 against every reminder in every list — see `matches_smart_list()` in
@@ -111,12 +121,12 @@ etc. — same trailing-phrase parsing as `remadd`'s due-date detection below.
 ### `remadd` — quick add
 
 ```
-remadd <title words...> [#List] [@tag ...] [!priority] [<due phrase>] [notes:<text>]
+remadd <title words...> [@List] [#tag ...] [!priority] [<due phrase>] [notes:<text>]
 ```
 
-- `#List` — target list (single word; lists with spaces in the name aren't
+- `@List` — target list (single word; lists with spaces in the name aren't
   supported by this shorthand — use `remctl add` directly for those)
-- `@tag` — repeatable; without `--private` these land as inline `#hashtags`
+- `#tag` — repeatable; without `--private` these land as inline `#hashtags`
   appended to the title (remctl limitation, not a synced tag) — see
   "Extending" below if you want real synced tags
 - `!priority` — `!high` / `!medium` / `!low` (or `!h`/`!m`/`!l`)
@@ -136,9 +146,9 @@ remadd <title words...> [#List] [@tag ...] [!priority] [<due phrase>] [notes:<te
 Examples:
 
 ```
-remadd Buy milk #Groceries tomorrow 9am
-remadd Buy milk #Groceries tom 9am
-remadd Ship notes #Work !high friday 3pm @errand
+remadd Buy milk @Groceries tomorrow 9am
+remadd Buy milk @Groceries tom 9am
+remadd Ship notes @Work !high friday 3pm #errand
 remadd Pay rent due:2026-06-01 notes:autopay is off this month
 ```
 
@@ -198,13 +208,16 @@ No Alfred needed for this — they're plain argv/env scripts:
 ```bash
 cd scripts
 python3 list_reminders.py ""                        # today + overdue
-python3 list_reminders.py "#Work"                    # one list or smart list
-python3 list_reminders.py "milk"                      # search
-python3 list_reminders.py "menu:23880"                 # action menu for one reminder
-python3 list_reminders.py "edit:23880:New title"        # edit text-entry preview
-python3 list_reminders.py "due:23880:tom 9am"            # reschedule text-entry preview
+python3 list_reminders.py "@Work"                    # one list or smart list
+python3 list_reminders.py "@Wo"                        # list/smart-list picker
+python3 list_reminders.py "#urgent"                     # tag filter, across all lists
+python3 list_reminders.py "#ur"                          # tag picker
+python3 list_reminders.py "milk"                          # search
+python3 list_reminders.py "menu:23880"                     # action menu for one reminder
+python3 list_reminders.py "edit:23880:New title"            # edit text-entry preview
+python3 list_reminders.py "due:23880:tom 9am"                # reschedule text-entry preview
 action=done reminder_id=23880 python3 reminder_action.py
-python3 quick_add.py "Buy milk #Groceries tomorrow 9am"
+python3 quick_add.py "Buy milk @Groceries tomorrow 9am"
 ```
 
 ## Extending
@@ -213,8 +226,9 @@ python3 quick_add.py "Buy milk #Groceries tomorrow 9am"
   all of this behind `--private` (unsupported private ReminderKit writes).
   `quick_add.py` and `reminder_action.py` are the two places to add
   `--private` and the relevant flags.
-- **Caching**: scope-level fetches (`today`, `all`, `#List`, `upcoming`,
-  smart-list emulation's underlying "all" fetch) are cached for
+- **Caching**: scope-level fetches (`today`, `all`, `@List`, `#tag`,
+  `upcoming`, smart-list emulation's underlying "all" fetch, plus the
+  `@`/`#` picker's list/smart-list/tag name lookups) are cached for
   `REMCTL_CACHE_TTL` seconds (default 5, set as a workflow variable) under
   `~/Library/Caches/com.alfredapp.reminders`. Free-text search and the
   menu/text-entry modes are never cached. `reminder_action.py` clears the
