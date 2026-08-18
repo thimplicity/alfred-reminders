@@ -134,10 +134,15 @@ class PickerNeeded(Exception):
     """Raised from fetch_scope() to hand control to a name picker instead
     of erroring on partial/unresolved @list or #tag text."""
 
-    def __init__(self, kind, partial):
+    def __init__(self, kind, partial, rest=""):
         super().__init__(kind)
         self.kind = kind  # "list" or "tag"
         self.partial = partial
+        # Free text typed after the tag, e.g. "report" in "#ur report" —
+        # carried through so completing the tag doesn't silently drop it.
+        # Lists have no equivalent: `@` always claims the rest of the query
+        # as the (possibly multi-word) name, by design.
+        self.rest = rest
 
 
 def fetch_known_tags():
@@ -174,7 +179,7 @@ def render_list_picker(partial):
     ]}
 
 
-def render_tag_picker(partial):
+def render_tag_picker(partial, rest=""):
     needle = partial.lower()
     matches = sorted(t for t in fetch_known_tags() if needle in t.lower())
     if not matches:
@@ -183,8 +188,14 @@ def render_tag_picker(partial):
             "subtitle": "Keep typing, or check remctl tags",
             "valid": False,
         }]}
+    suffix = f" {rest}" if rest else ""
     return {"items": [
-        {"title": f"#{tag}", "subtitle": "Tag", "valid": False, "autocomplete": f"#{tag}"}
+        {
+            "title": f"#{tag}",
+            "subtitle": f'Tag — keeps "{rest}" as a filter' if rest else "Tag",
+            "valid": False,
+            "autocomplete": f"#{tag}{suffix}",
+        }
         for tag in matches
     ]}
 
@@ -233,8 +244,9 @@ def fetch_scope(query_tokens):
 
     if first.startswith("#"):
         tag = first[1:]
+        rest = " ".join(query_tokens[1:])
         if not tag or tag.lower() not in {t.lower() for t in fetch_known_tags()}:
-            raise PickerNeeded("tag", tag)
+            raise PickerNeeded("tag", tag, rest)
         candidate_pool = fetch_all_items()
         items = [
             i for i in candidate_pool
@@ -360,7 +372,16 @@ def render_browse(query):
     try:
         items, free_text, skip_completed_filter = fetch_scope(tokens)
     except PickerNeeded as pick:
-        return render_list_picker(pick.partial) if pick.kind == "list" else render_tag_picker(pick.partial)
+        # A picker's own lists/smart-lists/tags lookup can itself fail
+        # (e.g. no Reminders permission yet), so it needs the same
+        # RemctlError handling as fetch_scope() — a bare except here
+        # wouldn't catch an error raised while rendering the picker below.
+        try:
+            if pick.kind == "list":
+                return render_list_picker(pick.partial)
+            return render_tag_picker(pick.partial, pick.rest)
+        except RemctlError as exc:
+            return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
     except RemctlError as exc:
         return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
 
