@@ -18,6 +18,18 @@ The object graph is intentionally minimal now (two keywords, each with one
 plain connection, no modifier-gated routing) specifically to keep that risk
 small.
 
+**Security note**: every script object embeds `"{query}"` directly into a
+`/bin/bash`-interpreted command line. Without escaping configured, a query
+containing shell metacharacters — e.g. a reminder title with `$(command)`
+in it, plausible from a shared-list collaborator — would have that command
+executed by bash before Python ever starts, under Alfred's own
+permissions. All four script objects now set `escaping: 102` (verified
+against a deanishe benchmark plist built for exactly this class of input,
+and against real third-party workflows on this machine using the same
+value for the same `"{query}"`-in-shell-argument pattern) to escape
+backquotes/dollars/double-quotes/backslashes before substitution. If you
+ever add a new script object with `"{query}"` in it, set this too.
+
 ## Setup
 
 ### 1. Install remctl
