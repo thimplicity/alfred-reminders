@@ -119,16 +119,20 @@ DATE_WORD_NORMALIZE = {
     "fri": "friday", "sat": "saturday", "sun": "sunday",
 }
 
-
-def normalize_date_phrase(text):
-    """Expand shorthand (tom, tmrw, mon, ...) before handing text to remctl's
-    date parser, which understands full words but not these abbreviations.
-    """
-    if not text:
-        return text
-    words = text.split()
-    return " ".join(DATE_WORD_NORMALIZE.get(w.lower(), w) for w in words)
-
+_MONTH_NAMES = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
 
 _DUE_WEEKDAYS = {
     "monday", "mon", "tuesday", "tue", "tues", "wednesday", "wed",
@@ -156,6 +160,31 @@ _HOUR_RE = re.compile(r"\d{1,2}(am|pm)$")
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}$")
 _RELATIVE_RE = re.compile(r"\+\d+[dwm]$")
 _BARE_INT_RE = re.compile(r"\d{1,4}$")
+_ORDINAL_DAY_RE = re.compile(r"\d{1,2}(?:st|nd|rd|th)$")
+# M/D or M/D/Y, e.g. "9/13", "9/9/26" — deliberately month-first (US style)
+# to match how the rest of this workflow's due-phrase examples read.
+_SLASH_DATE_RE = re.compile(r"\d{1,2}/\d{1,2}(?:/\d{2,4})?$")
+
+# Words that can be immediately glued to a time or day number with no
+# space — "tom9am", "friday3:30pm", "sep9" — typed this way often enough
+# (thumb-typing, autocomplete eating the space) that it's worth splitting
+# back apart rather than failing outright. Longest names first so
+# "tomorrow" matches before the shorter "tom" prefix would otherwise steal
+# part of it.
+_GLUE_DAYWORDS = sorted(set(DATE_WORD_NORMALIZE) | _DUE_WEEKDAYS | _DUE_DAY_WORDS, key=len, reverse=True)
+_GLUE_MONTHWORDS = sorted(_MONTH_NAMES, key=len, reverse=True)
+_DAYWORD_TIME_PATTERN = (
+    r"(" + "|".join(re.escape(w) for w in _GLUE_DAYWORDS) + r")"
+    r"(\d{1,2}(?::\d{2})?(?:am|pm))"
+)
+_MONTH_DAY_PATTERN = (
+    r"(" + "|".join(re.escape(w) for w in _GLUE_MONTHWORDS) + r")"
+    r"(\d{1,2})"
+)
+_GLUED_DAYWORD_TIME_RE = re.compile(r"^" + _DAYWORD_TIME_PATTERN + r"$")
+_GLUED_MONTH_DAY_RE = re.compile(r"^" + _MONTH_DAY_PATTERN + r"$")
+_DAYWORD_TIME_SPLIT_RE = re.compile(r"\b" + _DAYWORD_TIME_PATTERN + r"\b")
+_MONTH_DAY_SPLIT_RE = re.compile(r"\b" + _MONTH_DAY_PATTERN + r"\b")
 
 
 def _due_token_kind(tok):
@@ -163,17 +192,30 @@ def _due_token_kind(tok):
     plausibly belong to a trailing date/time phrase at all.
 
     "anchor" tokens are concrete enough to stand alone (a weekday, "9am",
-    an ISO date, ...). "modifier" ("in", "next", "at", ...), "unit"
-    ("days", "week", ...), and "daypart" ("morning", "night", ...) tokens
-    only count as part of a due phrase in combination with an anchor or
-    each other — see split_implicit_due() — so that a title ending in a
-    single stray preposition ("Check in", "Read on") or a bare time-of-day
-    word ("Movie night") isn't misread as one.
+    an ISO date, a slash date, a glued "tom9am"/"sep9", ...). "month"
+    tokens (a bare month name) are anchor-like but tracked separately so a
+    lone day number can be recognized as part of the phrase when it sits
+    next to one ("sep 9", "9 sep"). "modifier" ("in", "next", "at", ...),
+    "unit" ("days", "week", ...), and "daypart" ("morning", "night", ...)
+    tokens only count as part of a due phrase in combination with an
+    anchor/month or each other — see split_implicit_due() — so that a
+    title ending in a single stray preposition ("Check in", "Read on") or
+    a bare time-of-day word ("Movie night") isn't misread as one.
     """
     low = tok.lower().strip(",.")
     if low in _DUE_WEEKDAYS or low in _DUE_DAY_WORDS or low in _DUE_TIME_ANCHOR_WORDS:
         return "anchor"
-    if _TIME_RE.fullmatch(low) or _HOUR_RE.fullmatch(low) or _ISO_DATE_RE.fullmatch(low) or _RELATIVE_RE.fullmatch(low):
+    if low in _MONTH_NAMES:
+        return "month"
+    if (
+        _TIME_RE.fullmatch(low)
+        or _HOUR_RE.fullmatch(low)
+        or _ISO_DATE_RE.fullmatch(low)
+        or _RELATIVE_RE.fullmatch(low)
+        or _SLASH_DATE_RE.fullmatch(low)
+        or _GLUED_DAYWORD_TIME_RE.fullmatch(low)
+        or _GLUED_MONTH_DAY_RE.fullmatch(low)
+    ):
         return "anchor"
     if low in _DUE_UNIT_WORDS:
         return "unit"
@@ -181,7 +223,7 @@ def _due_token_kind(tok):
         return "modifier"
     if low in _DUE_DAYPART_WORDS:
         return "daypart"
-    if _BARE_INT_RE.fullmatch(low):
+    if _BARE_INT_RE.fullmatch(low) or _ORDINAL_DAY_RE.fullmatch(low):
         return "number"
     return None
 
@@ -195,21 +237,24 @@ def split_implicit_due(tokens):
 
     Returns (title_tokens, due_tokens). Only actually splits if the
     candidate suffix contains a concrete "anchor" (a weekday, "9am", an ISO
-    date, ...) or a modifier/unit pairing that only makes sense together
-    ("in 3 days", "next week") — a bare trailing modifier, unit, or
-    time-of-day word alone ("Check in", "Read on", "Movie night") is left
-    as part of the title instead of being misread as a due phrase. Daypart
-    words ("morning", "evening", ...) still extend the scan so a real
-    anchor earlier in the phrase isn't missed ("tomorrow morning", "Friday
+    date, a slash date like "9/13", a glued "tom9am"/"sep9", ...), a bare
+    month name paired with an adjacent day number ("sep 9", "9 sep"), or a
+    modifier/unit pairing that only makes sense together ("in 3 days",
+    "next week") — a bare trailing modifier, unit, or time-of-day word
+    alone ("Check in", "Read on", "Movie night") is left as part of the
+    title instead of being misread as a due phrase. Daypart words
+    ("morning", "evening", ...) still extend the scan so a real anchor
+    earlier in the phrase isn't missed ("tomorrow morning", "Friday
     evening" both still work), they just don't count as an anchor by
     themselves. A bare number only extends the scan when it's immediately
-    *followed* by a unit word ("in 3 days") or immediately *preceded* by
-    "at"/"by" ("tomorrow at 9", "by 5") — otherwise it's almost always just
-    part of the title ("Test 2", "Room 5") and shouldn't get pulled into a
-    due phrase just because an unrelated anchor happens to follow it
-    ("Test 2 tomorrow" must stay title="Test 2", due="tomorrow", not
-    due="2 tomorrow"). Always leaves at least one token as the title even
-    when the whole query looks date-like, so a title that's just "Tomorrow"
+    *followed* by a unit word ("in 3 days") or a month name ("9 sep"), or
+    immediately *preceded* by "at"/"by" ("tomorrow at 9", "by 5") or a
+    month name ("sep 9") — otherwise it's almost always just part of the
+    title ("Test 2", "Room 5") and shouldn't get pulled into a due phrase
+    just because an unrelated anchor happens to follow it ("Test 2
+    tomorrow" must stay title="Test 2", due="tomorrow", not due="2
+    tomorrow"). Always leaves at least one token as the title even when
+    the whole query looks date-like, so a title that's just "Tomorrow"
     doesn't turn into an empty-title reminder.
     """
     i = len(tokens)
@@ -220,22 +265,147 @@ def split_implicit_due(tokens):
             break
         if kind == "number":
             followed_by_unit = bool(kinds) and kinds[-1] == "unit"
-            preceded_by_hour_modifier = (
-                tokens[i - 2].lower().strip(",.") in _HOUR_MODIFIER_WORDS
-            )
-            if not (followed_by_unit or preceded_by_hour_modifier):
+            followed_by_month = bool(kinds) and kinds[-1] == "month"
+            preceding = tokens[i - 2].lower().strip(",.")
+            preceded_by_hour_modifier = preceding in _HOUR_MODIFIER_WORDS
+            preceded_by_month = preceding in _MONTH_NAMES
+            if not (followed_by_unit or followed_by_month or preceded_by_hour_modifier or preceded_by_month):
                 break
         kinds.append(kind)
         i -= 1
     kinds.reverse()
 
-    has_anchor = "anchor" in kinds
+    has_anchor = "anchor" in kinds or "month" in kinds
     has_numeric_duration = "unit" in kinds and "number" in kinds
     has_modifier_unit = "modifier" in kinds and "unit" in kinds
     if not (has_anchor or has_numeric_duration or has_modifier_unit):
         return tokens, []
 
     return tokens[:i], tokens[i:]
+
+
+def _resolve_year(month, day, year=None):
+    """A bare M/D (or month-name + day) is read as the next occurrence of
+    that date — this year if it hasn't passed yet, otherwise next year —
+    matching how most calendar/reminder apps read a bare date rather than
+    always assuming "this year" (which would silently create a reminder in
+    the past for a date already gone by). An explicit 2-digit year
+    ("9/9/26") is read as 20XX; a 4-digit year is used as-is.
+    """
+    today = dt.date.today()
+    if year is None:
+        year = today.year
+        try:
+            if dt.date(year, month, day) < today:
+                year += 1
+        except ValueError:
+            pass  # invalid day-of-month (e.g. Feb 30) — let the caller's own dt.date(...) raise
+    elif year < 100:
+        year += 2000
+    return year
+
+
+def _parse_day_number(word):
+    m = re.match(r"\d{1,2}", word)
+    return int(m.group(0)) if m else None
+
+
+def _slash_date_to_iso(word):
+    parts = word.split("/")
+    try:
+        month, day = int(parts[0]), int(parts[1])
+        year = int(parts[2]) if len(parts) == 3 else None
+        return dt.date(_resolve_year(month, day, year), month, day).isoformat()
+    except ValueError:
+        return None
+
+
+def normalize_date_phrase(text):
+    """Expand shorthand (tom, tmrw, mon, ...) and resolve concrete dates
+    (9/13, 9/9/26, sep 9, 9 sep, and glued forms like tom9am/sep9) before
+    handing text to remctl's own date parser.
+
+    remctl's parser only understands full relative-day words/phrases
+    ("tomorrow 09:30", "Friday at 15:00", "+3d") and ISO "YYYY-MM-DD[
+    HH:MM]" — confirmed directly against `remctl add -d <input>`, including
+    that it does *not* accept an ISO date next to a bare "9am" ("2026-09-13
+    9am" fails; "2026-09-13 09:00" works). So once a concrete date is found
+    here (from a slash date or a month/day pairing), it's fully resolved to
+    "YYYY-MM-DD[ HH:MM]" ourselves rather than leaving fragments for remctl
+    to parse. A phrase with no concrete date (the common case — "tomorrow
+    9am", "next friday", "in 3 days") is left for remctl's own parser,
+    which already handles those fine; this function only expands the
+    shorthand words it doesn't know (tom -> tomorrow, etc).
+    """
+    if not text:
+        return text
+
+    text = _DAYWORD_TIME_SPLIT_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}", text)
+    text = _MONTH_DAY_SPLIT_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}", text)
+    words = text.split()
+
+    resolved_date = None
+    leftover = []
+    i = 0
+    while i < len(words):
+        low = words[i].lower().strip(",.")
+        nxt = words[i + 1].lower().strip(",.") if i + 1 < len(words) else None
+
+        if _SLASH_DATE_RE.fullmatch(low):
+            iso = _slash_date_to_iso(low)
+            if iso:
+                resolved_date = iso
+                i += 1
+                continue
+
+        if low in _MONTH_NAMES and nxt and (_BARE_INT_RE.fullmatch(nxt) or _ORDINAL_DAY_RE.fullmatch(nxt)):
+            day = _parse_day_number(nxt)
+            try:
+                resolved_date = dt.date(_resolve_year(_MONTH_NAMES[low], day), _MONTH_NAMES[low], day).isoformat()
+                i += 2
+                continue
+            except (ValueError, TypeError):
+                pass
+
+        if nxt in _MONTH_NAMES and (_BARE_INT_RE.fullmatch(low) or _ORDINAL_DAY_RE.fullmatch(low)):
+            day = _parse_day_number(low)
+            try:
+                resolved_date = dt.date(_resolve_year(_MONTH_NAMES[nxt], day), _MONTH_NAMES[nxt], day).isoformat()
+                i += 2
+                continue
+            except (ValueError, TypeError):
+                pass
+
+        leftover.append(words[i])
+        i += 1
+
+    if resolved_date is None:
+        return " ".join(DATE_WORD_NORMALIZE.get(w.lower(), w) for w in words)
+
+    # A concrete date was found — pull a time out of whatever's left
+    # (connector words like "at"/"by" are simply ignored) and assemble the
+    # final string ourselves; see the docstring for why remctl can't be
+    # trusted to combine an ISO date with a bare "9am" itself.
+    time_24h = None
+    for w in leftover:
+        low = w.lower().strip(",.")
+        if low == "noon":
+            time_24h = "12:00"
+            break
+        if low == "midnight":
+            time_24h = "00:00"
+            break
+        m = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?(am|pm)?", low)
+        if m and (m.group(3) or m.group(2)):
+            hour, minute, meridiem = int(m.group(1)), int(m.group(2) or 0), m.group(3)
+            if meridiem == "pm" and hour != 12:
+                hour += 12
+            elif meridiem == "am" and hour == 12:
+                hour = 0
+            time_24h = f"{hour:02d}:{minute:02d}"
+            break
+
+    return f"{resolved_date} {time_24h}" if time_24h else resolved_date
 
 
 def matches_smart_list(item, smart_list):

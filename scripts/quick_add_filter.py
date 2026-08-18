@@ -135,16 +135,13 @@ def render_preview(query):
         }]}
 
     parsed = parse(query)
-    if not parsed["title"]:
-        return {"items": [{
-            "title": "No title yet",
-            "subtitle": "Keep typing a title for the reminder",
-            "valid": False,
-        }]}
 
     # Show all five slots every time, not just the ones already filled in —
     # otherwise there's nothing on screen reminding you the @/#/!/due/notes:
-    # syntax exists until you've already used it once.
+    # syntax exists until you've already used it once. Computed before the
+    # title check below so a list/tag/priority picked *before* any title
+    # text is typed still shows up instead of vanishing behind "No title
+    # yet".
     meta = [
         f"@{parsed['list']}" if parsed["list"] else "@list",
         " ".join(f"#{t}" for t in parsed["tags"]) if parsed["tags"] else "#tag",
@@ -152,6 +149,14 @@ def render_preview(query):
         f"due {parsed['due']}" if parsed["due"] else "due",
         f"notes: {parsed['notes']}" if parsed["notes"] else "notes:",
     ]
+
+    if not parsed["title"]:
+        return {"items": [{
+            "title": "No title yet",
+            "subtitle": "Keep typing a title — " + "  ·  ".join(meta),
+            "valid": False,
+        }]}
+
     subtitle = "↩ to add — " + "  ·  ".join(meta)
 
     return {"items": [{
