@@ -6,11 +6,11 @@ this same script on every keystroke/navigation, so "mode" just means "what
 does the current query string look like":
 
   browse (default)   rem <scope> <text>          -> reminder list
-  menu:<id>           reached via Tab or Return     -> read-only detail lines
-                       followed by the action menu for one item
+  menu:<id>           reached via Tab or Return     -> action menu for one item
   edit:<id>:<text>     reached via the menu         -> retitle, typing <text>
   due:<id>:<text>      reached via the menu         -> reschedule, typing <text>
   movelist:<id>:<text> reached via the menu         -> move, picking a list
+  view:<id>            reached via the menu         -> read-only detail screen
   confirm:<action>:<id>:<value>  reached from a menu action or a filled-in
                        text entry/picker              -> one-line summary,
                        one more Return actually executes it (skip via the
@@ -37,15 +37,21 @@ selecting one (Return, since these are `valid: false` items with an
 `autocomplete`) fills in the exact name and re-renders that scope
 immediately. See render_list_picker()/render_tag_picker().
 
-Row modifiers in browse mode: Return=details+actions, Shift=complete (a
-fast path that needs no further input; there's no delete anywhere in this
-workflow — use Reminders.app for that). Return used to open the reminder
-directly in Reminders.app, which was too easy to trigger by accident when
-what you actually wanted was more info — now both Tab and Return drill
-into the same menu screen (reschedule/change-title/move also live there,
-since those need a follow-up text entry or picker, and "Open in
-Reminders.app" is still one of the menu's actions, just no longer the
-default). Per Alfred's own docs, an item's "autocomplete" field is a
+Row modifiers in browse mode: Return=menu, Shift=complete (a fast path
+that needs no further input; there's no delete anywhere in this workflow
+— use Reminders.app for that). Return used to open the reminder directly
+in Reminders.app, which was too easy to trigger by accident when what you
+actually wanted was more info — now both Tab and Return drill into the
+action menu (reschedule/change-title/move/view-details also live there,
+since those need a follow-up text entry, picker, or just more screen
+space than a modifier+Return can provide, and "Open in Reminders.app" is
+still one of the menu's actions, just no longer the default). Tab and
+Return can't be made to land on two *different* screens here — Alfred
+drives both keys off the same item, and the only way Return can diverge
+from Tab at all is by firing a terminal action immediately (no room for a
+list of choices), so the menu stays a single actions-first screen with
+"View details" as one of its entries rather than a separate key-mapped
+destination. Per Alfred's own docs, an item's "autocomplete" field is a
 Tab-triggered behavior specifically — an earlier version of this workflow
 incorrectly documented Right Arrow as equivalent, which it isn't for a
 plain Script Filter item. Right Arrow itself is a fixed Alfred behavior
@@ -68,15 +74,26 @@ from _remctl import (
     items_from,
     matches_smart_list,
     normalize_date_phrase,
+    reminders_app_icon,
     run,
 )
 
 CACHE_TTL = 5  # seconds; only applies to scope-level fetches, not free text
+# Computed once at import time rather than per-render — Reminders.app's
+# location doesn't change mid-process. See reminders_app_icon()'s
+# docstring for why every list-representing row (not reminder rows) uses
+# this: it's a free, always-available "this is a list" glyph.
+LIST_ICON = reminders_app_icon()
+
+
+def _icon_kwargs():
+    return {"icon": LIST_ICON} if LIST_ICON else {}
 
 MENU_RE = re.compile(r"^menu:(\d+)$")
 EDIT_RE = re.compile(r"^edit:(\d+):(.*)$", re.DOTALL)
 DUE_RE = re.compile(r"^due:(\d+):(.*)$", re.DOTALL)
 MOVE_RE = re.compile(r"^movelist:(\d+):(.*)$", re.DOTALL)
+VIEW_RE = re.compile(r"^view:(\d+)$")
 CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|move):(\d+):(.*)$", re.DOTALL)
 
 
@@ -164,7 +181,7 @@ def render_list_picker(partial):
             "valid": False,
         }]}
     return {"items": [
-        {"title": name, "subtitle": kind, "valid": False, "autocomplete": f"@{name}"}
+        {"title": name, "subtitle": kind, "valid": False, "autocomplete": f"@{name}", **_icon_kwargs()}
         for name, kind in matches
     ]}
 
@@ -216,8 +233,17 @@ def resolve_named_scope(name):
 def fetch_scope(query_tokens):
     """Returns (items, remaining_free_text, skip_completed_filter)."""
     if not query_tokens:
-        payload = cached_run("scope:today", ["today"], ttl=CACHE_TTL)
-        return items_from(payload), "", False
+        # DEFAULT_SCOPE (a workflow variable, unset by default) lets `rem`
+        # alone show something other than "today + overdue" — e.g. set it
+        # to "@Tasks" or "upcoming 14" to make that the default landing
+        # scope instead. Falling through to the rest of this function with
+        # its tokens (rather than special-casing it here) means it gets
+        # exactly the same scope grammar as if the user had typed it.
+        default_scope = os.environ.get("DEFAULT_SCOPE", "").strip()
+        if not default_scope:
+            payload = cached_run("scope:today", ["today"], ttl=CACHE_TTL)
+            return items_from(payload), "", False
+        query_tokens = default_scope.split()
 
     first = query_tokens[0]
 
@@ -334,10 +360,11 @@ def build_browse_item(item):
 
     # Return used to open the reminder directly in Reminders.app — easy to
     # trigger by accident when what you actually wanted was more info.
-    # Return and Tab now both drill into the same details+actions screen
-    # (menu:<id>, itself valid:false so both keys autocomplete into it);
-    # "Open in Reminders.app" is still there as one of that screen's
-    # actions, just no longer the accidental default.
+    # Return and Tab now both drill into the action menu (menu:<id>, itself
+    # valid:false so both keys autocomplete into it) instead; "Open in
+    # Reminders.app" is still there as one of that screen's actions, just
+    # no longer the accidental default. Tab and Return can't be routed to
+    # two different screens from this one item — see the module docstring.
     result = {
         "uid": reminder_id,
         "title": title,
@@ -406,14 +433,15 @@ MENU_ACTIONS = [
     ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am", False, None),
     ("Change title…", None, "edit", "type a new title, or add #tag to tag it", True, None),
     ("Move to another list…", None, "movelist", "type or pick a list", False, None),
+    ("View details", None, "view", "see notes, priority, flag, and tags", None, None),
     ("Open in Reminders.app", "open", None, None, False, False),
 ]
 
 
 def render_menu(reminder_id):
-    """Both Return and Tab land here from the browse list now (see
-    build_browse_item()), so this doubles as the details view: read-only
-    info lines first for context, then the same actions as before.
+    """Actions only — no read-only detail lines mixed in here, so this
+    stays a pure "what do you want to do" list; "View details" below is
+    its own drill-in to render_view()'s separate read-only screen instead.
     """
     try:
         info = run(["info", reminder_id], json_output=True)
@@ -421,28 +449,7 @@ def render_menu(reminder_id):
         return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
 
     title = info.get("title") or f"#{reminder_id}"
-    base_vars = {"reminder_id": reminder_id, "reminder_title": title, "action": "open"}
-
-    detail_lines = [
-        ("Title", title),
-        ("List", info.get("list") or "—"),
-        ("Due", humanize_due(info)),
-        ("Priority", (info.get("priority") or "none").capitalize()),
-        ("Flagged", "Yes" if info.get("flagged") else "No"),
-        ("Tags", ", ".join(info.get("tags") or []) or "none"),
-        ("Notes", info.get("notes") or "none"),
-    ]
-    items = [
-        {
-            "title": f"{label}: {value}",
-            "subtitle": "↩ to open in Reminders.app",
-            "arg": reminder_id,
-            "valid": True,
-            "variables": dict(base_vars),
-        }
-        for label, value in detail_lines
-    ]
-
+    items = []
     for label, action, drill_prefix, hint, prefill_title, needs_confirm in MENU_ACTIONS:
         if action and needs_confirm and confirm_enabled():
             # "Mark as complete" is the only menu entry that both mutates
@@ -468,6 +475,15 @@ def render_menu(reminder_id):
                     "reminder_title": title,
                 },
             })
+        elif prefill_title is None:
+            # View details is direct navigation, not a text-entry drill —
+            # no trailing ":text" slot to fill in.
+            items.append({
+                "title": label,
+                "subtitle": f"“{title}” — {hint}",
+                "valid": False,
+                "autocomplete": f"{drill_prefix}:{reminder_id}",
+            })
         else:
             # Change-title prefills the current title so adding a #tag (or
             # a small tweak) doesn't require retyping the whole thing —
@@ -481,6 +497,36 @@ def render_menu(reminder_id):
                 "autocomplete": f"{drill_prefix}:{reminder_id}:{prefill}",
             })
     return {"items": items}
+
+
+def render_view(reminder_id):
+    try:
+        info = run(["info", reminder_id], json_output=True)
+    except RemctlError as exc:
+        return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
+
+    title = info.get("title") or f"#{reminder_id}"
+    base_vars = {"reminder_id": reminder_id, "reminder_title": title, "action": "open"}
+
+    lines = [
+        ("Title", title),
+        ("List", info.get("list") or "—"),
+        ("Due", humanize_due(info)),
+        ("Priority", (info.get("priority") or "none").capitalize()),
+        ("Flagged", "Yes" if info.get("flagged") else "No"),
+        ("Tags", ", ".join(info.get("tags") or []) or "none"),
+        ("Notes", info.get("notes") or "none"),
+    ]
+    return {"items": [
+        {
+            "title": f"{label}: {value}",
+            "subtitle": "↩ to open in Reminders.app",
+            "arg": reminder_id,
+            "valid": True,
+            "variables": dict(base_vars),
+        }
+        for label, value in lines
+    ]}
 
 
 def render_move_picker(reminder_id, partial):
@@ -509,6 +555,7 @@ def render_move_picker(reminder_id, partial):
                 "subtitle": "Tab to review before confirming",
                 "valid": False,
                 "autocomplete": f"confirm:move:{reminder_id}:{name}",
+                **_icon_kwargs(),
             }
             for name in matches
         ]}
@@ -519,6 +566,7 @@ def render_move_picker(reminder_id, partial):
             "arg": name,
             "valid": True,
             "variables": {"action": "move", "reminder_id": reminder_id},
+            **_icon_kwargs(),
         }
         for name in matches
     ]}
@@ -599,6 +647,11 @@ def main():
             print(json.dumps(render_move_picker(reminder_id, typed)))
         except RemctlError as exc:
             print(json.dumps({"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}))
+        return
+
+    view_match = VIEW_RE.match(query)
+    if view_match:
+        print(json.dumps(render_view(view_match.group(1))))
         return
 
     print(json.dumps(render_browse(query)))

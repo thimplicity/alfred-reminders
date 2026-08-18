@@ -22,6 +22,8 @@
 		<string>5</string>
 		<key>CONFIRM_CHANGES</key>
 		<string>1</string>
+		<key>DEFAULT_SCOPE</key>
+		<string></string>
 	</dict>
 	<key>variablesdontexport</key>
 	<array/>

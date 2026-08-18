@@ -28,10 +28,17 @@ Keyword Input.
 import json
 import sys
 
-from _remctl import RemctlError, fetch_known_tags, fetch_list_and_smart_list_names
+from _remctl import RemctlError, fetch_known_tags, fetch_list_and_smart_list_names, reminders_app_icon
 from quick_add import parse
 
 PRIORITY_CHOICES = ["high", "medium", "low"]
+# See list_reminders.py's LIST_ICON for why: a free, always-available
+# "this is a list" glyph for list-representing rows, computed once.
+LIST_ICON = reminders_app_icon()
+
+
+def _icon_kwargs():
+    return {"icon": LIST_ICON} if LIST_ICON else {}
 
 
 def replace_last_token(query, new_token):
@@ -101,6 +108,7 @@ def render_list_completion(query, partial):
             "subtitle": "Tab to pick this list and keep typing",
             "valid": False,
             "autocomplete": replace_last_token(query, f"@{name}"),
+            **_icon_kwargs(),
         }
         for name in matches
     ]}
@@ -135,16 +143,13 @@ def render_preview(query):
         }]}
 
     parsed = parse(query)
-    if not parsed["title"]:
-        return {"items": [{
-            "title": "No title yet",
-            "subtitle": "Keep typing a title for the reminder",
-            "valid": False,
-        }]}
 
     # Show all five slots every time, not just the ones already filled in —
     # otherwise there's nothing on screen reminding you the @/#/!/due/notes:
-    # syntax exists until you've already used it once.
+    # syntax exists until you've already used it once. Computed before the
+    # title check below so a list/tag/priority picked *before* any title
+    # text is typed still shows up instead of vanishing behind "No title
+    # yet".
     meta = [
         f"@{parsed['list']}" if parsed["list"] else "@list",
         " ".join(f"#{t}" for t in parsed["tags"]) if parsed["tags"] else "#tag",
@@ -152,6 +157,14 @@ def render_preview(query):
         f"due {parsed['due']}" if parsed["due"] else "due",
         f"notes: {parsed['notes']}" if parsed["notes"] else "notes:",
     ]
+
+    if not parsed["title"]:
+        return {"items": [{
+            "title": "No title yet",
+            "subtitle": "Keep typing a title — " + "  ·  ".join(meta),
+            "valid": False,
+        }]}
+
     subtitle = "↩ to add — " + "  ·  ".join(meta)
 
     return {"items": [{
