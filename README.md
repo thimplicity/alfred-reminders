@@ -188,7 +188,7 @@ A macOS notification confirms success or reports the failure.
 ```
 
 Two objects per keyword, one plain connection each — no modifier-gated
-routing anywhere. `list_reminders.py` handles browse, the Right-Arrow
+routing anywhere. `list_reminders.py` handles browse, the Tab-triggered
 action menu, *and* the edit/reschedule text-entry prompts all in one
 script, branching on a prefix in the query string itself (`menu:<id>`,
 `edit:<id>:<text>`, `due:<id>:<text>` — see the module docstring). Only the
