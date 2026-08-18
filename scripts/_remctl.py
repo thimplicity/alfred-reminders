@@ -332,3 +332,43 @@ def items_from(payload):
     if isinstance(payload, list):
         return payload
     return []
+
+
+def flatten_lists(payload):
+    """`remctl lists --json` returns group rows (isGroup: true) interleaved
+    with plain list rows; both use "title" for the display name. Group rows
+    carry a "children" array (possibly of child dicts or child names) —
+    recurse into it when present, otherwise skip the group itself, since it
+    isn't something `show` can target directly.
+    """
+    names = []
+    for entry in payload if isinstance(payload, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("isGroup"):
+            for child in entry.get("children") or []:
+                if isinstance(child, dict) and child.get("title"):
+                    names.append(child["title"])
+                elif isinstance(child, str):
+                    names.append(child)
+            continue
+        if entry.get("title"):
+            names.append(entry["title"])
+    return names
+
+
+def fetch_known_tags():
+    payload = cached_run("scope:tags", ["tags"])
+    return [t.get("name") for t in (payload if isinstance(payload, list) else []) if t.get("name")]
+
+
+def fetch_list_and_smart_list_names():
+    lists_payload = cached_run("scope:lists", ["lists"])
+    smart_payload = cached_run("scope:smart-lists", ["smart-lists"])
+    entries = [(name, "List") for name in flatten_lists(lists_payload)]
+    entries += [
+        (sl.get("name"), "Smart list")
+        for sl in (smart_payload if isinstance(smart_payload, list) else [])
+        if sl.get("name")
+    ]
+    return entries

@@ -18,27 +18,25 @@ The object graph is intentionally minimal now (two keywords, each with one
 plain connection, no modifier-gated routing) specifically to keep that risk
 small.
 
-**Security note**: every script object that embeds `"{query}"` directly
-into a `/bin/bash`-interpreted command line needs escaping configured,
-otherwise a query containing shell metacharacters would have that command
-executed by bash before Python ever starts, under Alfred's own
-permissions. Concretely reachable on this branch: the `@`/`#` picker's
-`autocomplete` values are built directly from list and tag names
-(`f"@{name}"` / `f"#{tag}"` in `render_list_picker()`/`render_tag_picker()`
-— see `scripts/list_reminders.py`), and a list can be renamed by anyone
-it's shared with over iCloud. A shared list renamed to `$(command)` would
-show up as a picker entry when the local user types `rem @` — typing
-alone doesn't trigger anything, since the malicious name only lives in
-that entry's `autocomplete` field at that point. Selecting it (Tab, which
-replaces the query with that value) is what puts the name into `{query}`
-on the *next* invocation, and that's the point bash evaluates it. All three
-script-bearing objects that do this
-(the `rem` Script Filter and both Run Scripts — `remadd`'s Keyword Input
-doesn't embed `{query}` in a script string at all, so it isn't affected)
-now set `escaping: 102` (verified against a deanishe benchmark plist built
-for exactly this class of input, and against real third-party workflows on
+**Security note**: every script object embeds `"{query}"` directly into a
+`/bin/bash`-interpreted command line, so without escaping configured, a
+query containing shell metacharacters would have that command executed by
+bash before Python ever starts, under Alfred's own permissions. Two
+reachable paths on this branch, both requiring a selection, not just
+typing — **Change title…** prefills a reminder's current title into
+`autocomplete` (`render_menu()` in `scripts/list_reminders.py`), so a
+title containing `$(command)` — plausible from a collaborator on a shared
+list — would reach `{query}` once you select that menu entry (Tab); the
+`@`/`#` picker's `autocomplete` values are similarly built from list/tag
+names (`render_list_picker()`/`render_tag_picker()`), which a shared-list
+collaborator can also rename — typing `rem @` alone only renders the
+picker entry, it's selecting it (Tab) that puts the name into `{query}`
+on the *next* invocation, the point bash actually evaluates it. All four
+script objects (`rem` and `remadd` Script Filters, both Run Scripts) set
+`escaping: 102` — verified against a deanishe benchmark plist built for
+exactly this class of input, and against real third-party workflows on
 this machine using the same value for the same
-`"{query}"`-in-shell-argument pattern) to escape
+`"{query}"`-in-shell-argument pattern — to escape
 backquotes/dollars/double-quotes/backslashes before substitution. If you
 ever add a new script object with `"{query}"` in it, set this too.
 
@@ -106,9 +104,9 @@ filter, same as `flagged`/`overdue`.
 **Live picker**: typing `@` or `#` with no exact match yet — rather than
 erroring on partial text — shows every list/smart-list or tag whose name
 contains what you've typed so far (`@` with nothing after it lists
-everything). Selecting one (Return) fills in the exact name and immediately
-shows that scope, since these are `autocomplete` items rather than an
-action — no separate confirm step needed.
+everything). These are `valid: false` `autocomplete` items, so Tab (not
+Return) fills in the exact name and immediately shows that scope — no
+separate confirm step needed.
 
 **Smart lists**: `remctl` can inspect a smart list's filter definition but
 has no command to fetch its live contents, so `@Name` tries a real list
@@ -127,7 +125,7 @@ not exhaustively against every filter kind Reminders supports.
 | Key | Action |
 |---|---|
 | Return | Open in Reminders.app |
-| ⇧ Return | Mark complete |
+| ⇧ Return | Mark complete — **only when `CONFIRM_CHANGES=0`**; otherwise Shift is unbound (falls back to the default Return/open) and completing goes through the menu instead, since a modifier can't drill into the confirm step |
 | ⇥ Tab | Open the action menu for that reminder |
 
 Tab, not Right Arrow — per Alfred's own docs, an item's `autocomplete`
@@ -153,12 +151,13 @@ Reschedule, change-title, move, and view-details all need a follow-up
 value or more screen space than a modifier+Return can give (a modifier is
 a one-shot fire-and-forget action, not an interactive prompt or a second
 screen), which is why they live in the menu rather than on a modifier
-key. Tab into the menu, then Tab or Return on "Reschedule…" / "Change
+key. Tab into the menu, then Tab again on "Reschedule…" / "Change
 title…" / "Move to another list…" / "View details" drops you into a
-text-entry prompt, picker, or read-only detail screen. To back out of any
-of these without finishing, just backspace the query text (it's plain
-editable text at that point, e.g. `menu:3724` or `edit:3724:`) back down
-to `rem` and continue browsing.
+text-entry prompt, picker, or read-only detail screen — these are
+`valid: false` items, so only Tab applies their `autocomplete`; Return
+does nothing on them. To back out of any of these without finishing, just
+backspace the query text (it's plain editable text at that point, e.g.
+`menu:3724` or `edit:3724:`) back down to `rem` and continue browsing.
 
 **View details** shows title, list, due date, priority, flag, tags, and
 notes as a read-only screen (Return on any line just opens the reminder
@@ -230,6 +229,21 @@ remadd <title words...> [@List] [#tag ...] [!priority] [<due phrase>] [notes:<te
   auto-detected, since free text can't be told apart from a due phrase by
   pattern alone
 
+**Live completion**: `remadd` is a Script Filter, so it re-renders on every
+keystroke. Whenever the word you're currently typing starts with `@`, `#`,
+or `!` (and you haven't closed it with a space yet), it shows matching
+lists, tags, or priorities instead of the usual preview — Tab on one fills
+in just that word and puts the cursor back at the end so you keep typing
+the rest (`@Groceries `, then continue with `tomorrow 9am`); these rows
+are `valid: false`, so Return doesn't apply the completion.
+The `@` picker only offers single-word real lists (smart lists aren't
+valid add targets, and multi-word names aren't representable in this
+inline shorthand anyway). Once a word is closed with a space, normal
+preview mode resumes: the result becomes a live summary of everything
+parsed so far (title, list, tags, priority, due, notes), and Return adds
+the reminder at any point — you don't have to use a suggestion, typing a
+brand-new tag or a due phrase by hand works exactly as before.
+
 Examples:
 
 ```
@@ -248,7 +262,9 @@ A macOS notification confirms success or reports the failure.
       │ (Return / ⇧ / ⌃⌥⌘, default connection — the only connection)
       └──────────────────────────────▶ Run Script   scripts/reminder_action.py
 
-[remadd, keyword]  ──▶ Run Script       scripts/quick_add.py
+[remadd, keyword]  Script Filter        scripts/quick_add_filter.py
+      │ (Return, default connection — the only connection)
+      └──────────────────────────────▶ Run Script   scripts/quick_add.py
 ```
 
 Two objects per keyword, one plain connection each — no modifier-gated
@@ -257,8 +273,13 @@ action menu, the edit/reschedule/move text-entry prompts and picker, the
 read-only details screen, *and* the confirm-step summary all in one
 script, branching on a prefix in the query string itself (`menu:<id>`,
 `edit:<id>:<text>`, `due:<id>:<text>`, `movelist:<id>:<text>`, `view:<id>`,
-`confirm:<action>:<id>:<value>` — see the module docstring). Only the
-terminal actions (open/complete/edit/reschedule/move) reach
+`confirm:<action>:<id>:<value>` — see the module docstring).
+`quick_add_filter.py` similarly handles both the `@`/`#`/`!` live
+completion and the running preview, but never calls `remctl` itself — its
+one valid output item's `arg` is the full query text, unchanged, which is
+what `quick_add_filter.py` was already parsing for the preview and is
+exactly what `quick_add.py` re-parses to actually create the reminder.
+Only the terminal actions (open/complete/edit/reschedule/move) reach
 `reminder_action.py`, which is the only script that actually calls
 `remctl` to mutate anything — `view:<id>` never does, it only reads.
 
@@ -319,6 +340,10 @@ python3 list_reminders.py "confirm:done:23880:"                    # confirm-ste
 CONFIRM_CHANGES=0 python3 list_reminders.py "edit:23880:New title"   # with confirm disabled
 action=done reminder_id=23880 python3 reminder_action.py
 python3 quick_add.py "Buy milk @Groceries tomorrow 9am"
+python3 quick_add_filter.py "Buy milk"                     # live preview
+python3 quick_add_filter.py "Buy milk @Ta"                   # list completion
+python3 quick_add_filter.py "Buy milk #wo"                    # tag completion
+python3 quick_add_filter.py "Buy milk !h"                      # priority completion
 ```
 
 ## Extending

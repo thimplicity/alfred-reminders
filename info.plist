@@ -81,23 +81,33 @@
 		</dict>
 		<dict>
 			<key>type</key>
-			<string>alfred.workflow.input.keyword</string>
+			<string>alfred.workflow.input.scriptfilter</string>
 			<key>uid</key>
 			<string>BCE5D581-6A26-4FEB-9452-39A1214A2440</string>
 			<key>version</key>
-			<integer>1</integer>
+			<integer>3</integer>
 			<key>config</key>
 			<dict>
 				<key>keyword</key>
 				<string>remadd</string>
-				<key>argumenttype</key>
-				<integer>0</integer>
-				<key>subtext</key>
-				<string>title @List #tag !priority due-phrase notes:text</string>
-				<key>text</key>
-				<string>Add reminder</string>
 				<key>withspace</key>
 				<true/>
+				<key>title</key>
+				<string>Add reminder</string>
+				<key>runningsubtext</key>
+				<string>Checking…</string>
+				<key>subtext</key>
+				<string>title @List #tag !priority due-phrase notes:text — Tab to complete a @/#/! word</string>
+				<key>type</key>
+				<integer>0</integer>
+				<key>script</key>
+				<string>/usr/bin/python3 scripts/quick_add_filter.py "{query}"</string>
+				<key>scriptargtype</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>1</integer>
+				<key>escaping</key>
+				<integer>102</integer>
 			</dict>
 		</dict>
 		<dict>

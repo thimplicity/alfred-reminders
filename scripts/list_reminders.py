@@ -60,6 +60,9 @@ import sys
 from _remctl import (
     RemctlError,
     cached_run,
+    fetch_known_tags,
+    fetch_list_and_smart_list_names,
+    flatten_lists,
     items_from,
     matches_smart_list,
     normalize_date_phrase,
@@ -87,29 +90,6 @@ def confirm_enabled():
 # ---------------------------------------------------------------------------
 # List / smart-list resolution
 # ---------------------------------------------------------------------------
-
-def flatten_lists(payload):
-    """`remctl lists --json` returns group rows (isGroup: true) interleaved
-    with plain list rows; both use "title" for the display name. Group rows
-    carry a "children" array (possibly of child dicts or child names) —
-    recurse into it when present, otherwise skip the group itself, since it
-    isn't something `show` can target directly.
-    """
-    names = []
-    for entry in payload if isinstance(payload, list) else []:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("isGroup"):
-            for child in entry.get("children") or []:
-                if isinstance(child, dict) and child.get("title"):
-                    names.append(child["title"])
-                elif isinstance(child, str):
-                    names.append(child)
-            continue
-        if entry.get("title"):
-            names.append(entry["title"])
-    return names
-
 
 def fetch_all_items():
     lists_payload = cached_run("scope:lists", ["lists"], ttl=CACHE_TTL)
@@ -169,23 +149,6 @@ class PickerNeeded(Exception):
         # Lists have no equivalent: `@` always claims the rest of the query
         # as the (possibly multi-word) name, by design.
         self.rest = rest
-
-
-def fetch_known_tags():
-    payload = cached_run("scope:tags", ["tags"], ttl=CACHE_TTL)
-    return [t.get("name") for t in (payload if isinstance(payload, list) else []) if t.get("name")]
-
-
-def fetch_list_and_smart_list_names():
-    lists_payload = cached_run("scope:lists", ["lists"], ttl=CACHE_TTL)
-    smart_payload = cached_run("scope:smart-lists", ["smart-lists"], ttl=CACHE_TTL)
-    entries = [(name, "List") for name in flatten_lists(lists_payload)]
-    entries += [
-        (sl.get("name"), "Smart list")
-        for sl in (smart_payload if isinstance(smart_payload, list) else [])
-        if sl.get("name")
-    ]
-    return entries
 
 
 def render_list_picker(partial):
@@ -368,20 +331,29 @@ def build_browse_item(item):
     title = item.get("title") or "(untitled)"
     base_vars = {"reminder_id": reminder_id, "reminder_title": title}
 
-    return {
+    result = {
         "uid": reminder_id,
         "title": title,
         "subtitle": build_subtitle(item),
         "arg": reminder_id,
         "autocomplete": f"menu:{reminder_id}",
         "variables": dict(base_vars, action="open"),
-        "mods": {
+    }
+    # A modifier fires its variables immediately on Return — there's no
+    # autocomplete-style drill-in for mods, so Shift+Return can't be routed
+    # through the confirm step the way the menu's "Mark as complete" can.
+    # Omit the shortcut entirely while confirmation is on, rather than
+    # silently bypass the "every mutation gets reviewed" guarantee; Tab
+    # into the menu instead. Shift falls back to the default (open) action
+    # when omitted, same as any other unhandled modifier.
+    if not confirm_enabled():
+        result["mods"] = {
             "shift": {
                 "subtitle": f"Complete “{title}”",
                 "variables": dict(base_vars, action="done"),
             },
-        },
-    }
+        }
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +514,7 @@ def render_move_picker(reminder_id, partial):
         return {"items": [
             {
                 "title": name,
-                "subtitle": "↩ or Tab to review before confirming",
+                "subtitle": "Tab to review before confirming",
                 "valid": False,
                 "autocomplete": f"confirm:move:{reminder_id}:{name}",
             }
@@ -587,7 +559,7 @@ def render_text_input(reminder_id, action, typed_text, prompt_hint):
     if typed_text and confirm_enabled():
         item = {
             "title": typed_text,
-            "subtitle": "↩ or Tab to review before confirming",
+            "subtitle": "Tab to review before confirming",
             "valid": False,
             "autocomplete": f"confirm:{action}:{reminder_id}:{typed_text}",
         }

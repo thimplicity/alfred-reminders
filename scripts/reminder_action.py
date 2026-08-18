@@ -10,9 +10,12 @@ keystroke reflects the change immediately.
 """
 import glob
 import os
+import re
 import sys
 
 from _remctl import CACHE_DIR, RemctlError, normalize_date_phrase, run
+
+_TAG_TOKEN_RE = re.compile(r"(?:(?<=\s)|^)#(\S+) ?")
 
 
 def clear_cache():
@@ -28,11 +31,20 @@ def extract_tags(text):
     tags (via --private -t) instead of literal "#tag" characters left in
     the title — plain `edit --title` never auto-converts hashtag-looking
     text into a tag, verified directly against a real reminder.
+
+    Removes only the matched "#tag " spans from the original string rather
+    than splitting on whitespace and rejoining with single spaces, which
+    would silently collapse any repeated whitespace elsewhere in the title
+    even when no tag is present at all.
     """
-    words = text.split()
-    tags = [w[1:] for w in words if w.startswith("#") and len(w) > 1]
-    title_words = [w for w in words if not (w.startswith("#") and len(w) > 1)]
-    return " ".join(title_words).strip(), tags
+    tags = []
+
+    def _consume(match):
+        tags.append(match.group(1))
+        return ""
+
+    new_title = _TAG_TOKEN_RE.sub(_consume, text).strip()
+    return new_title, tags
 
 
 def main():
