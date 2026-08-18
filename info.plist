@@ -43,7 +43,7 @@
 				<key>runningsubtext</key>
 				<string>Searching reminders…</string>
 				<key>subtext</key>
-				<string>Type to search, #List for a list/smart list, "all", "upcoming", "flagged" — Right Arrow for actions</string>
+				<string>Type to search, @List for a list/smart list, #tag, "all", "upcoming", "flagged" — Right Arrow for actions</string>
 				<key>type</key>
 				<integer>0</integer>
 				<key>script</key>
@@ -89,7 +89,7 @@
 				<key>argumenttype</key>
 				<integer>0</integer>
 				<key>subtext</key>
-				<string>title #List @tag !priority due-phrase notes:text</string>
+				<string>title @List #tag !priority due-phrase notes:text</string>
 				<key>text</key>
 				<string>Add reminder</string>
 				<key>withspace</key>

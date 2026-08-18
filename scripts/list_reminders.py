@@ -13,15 +13,23 @@ does the current query string look like":
 Browse-mode scope grammar (all optional, space separated):
   rem                     -> due today + overdue (remctl today)
   rem <free text>         -> full-text search across all lists (remctl search)
-  rem #<List or SmartList> -> everything in one list, or one smart list
+  rem @<List or SmartList> -> everything in one list, or one smart list
                               (smart lists are matched client-side — remctl
                               can only inspect their filter definition, not
                               fetch contents, so see matches_smart_list())
+  rem #<tag>              -> every reminder with that tag, across all lists
   rem all                 -> every open reminder across every list
   rem all <text>          -> same, locally filtered by <text>
   rem upcoming [N]        -> due within N days (default 7)
   rem flagged             -> flagged reminders
   rem overdue             -> overdue only
+
+`@` and `#` both double as live pickers: if what follows doesn't exactly
+match a real list/smart-list (for `@`) or a known tag (for `#`), instead of
+erroring on the partial text, show every name that contains it so far —
+selecting one (Return, since these are `valid: false` items with an
+`autocomplete`) fills in the exact name and re-renders that scope
+immediately. See render_list_picker()/render_tag_picker().
 
 Row modifiers in browse mode: Return=open, Shift=complete,
 Ctrl+Option+Cmd=delete (all fast paths that need no further input). Right
@@ -122,6 +130,76 @@ def fetch_smart_list_items(smart_list):
     return [i for i in fetch_all_items() if matches_smart_list(i, smart_list)]
 
 
+class PickerNeeded(Exception):
+    """Raised from fetch_scope() to hand control to a name picker instead
+    of erroring on partial/unresolved @list or #tag text."""
+
+    def __init__(self, kind, partial, rest=""):
+        super().__init__(kind)
+        self.kind = kind  # "list" or "tag"
+        self.partial = partial
+        # Free text typed after the tag, e.g. "report" in "#ur report" —
+        # carried through so completing the tag doesn't silently drop it.
+        # Lists have no equivalent: `@` always claims the rest of the query
+        # as the (possibly multi-word) name, by design.
+        self.rest = rest
+
+
+def fetch_known_tags():
+    payload = cached_run("scope:tags", ["tags"], ttl=CACHE_TTL)
+    return [t.get("name") for t in (payload if isinstance(payload, list) else []) if t.get("name")]
+
+
+def fetch_list_and_smart_list_names():
+    lists_payload = cached_run("scope:lists", ["lists"], ttl=CACHE_TTL)
+    smart_payload = cached_run("scope:smart-lists", ["smart-lists"], ttl=CACHE_TTL)
+    entries = [(name, "List") for name in flatten_lists(lists_payload)]
+    entries += [
+        (sl.get("name"), "Smart list")
+        for sl in (smart_payload if isinstance(smart_payload, list) else [])
+        if sl.get("name")
+    ]
+    return entries
+
+
+def render_list_picker(partial):
+    needle = partial.lower()
+    matches = sorted(
+        (n, kind) for n, kind in fetch_list_and_smart_list_names() if needle in n.lower()
+    )
+    if not matches:
+        return {"items": [{
+            "title": f'No list matches "{partial}"' if partial else "No lists found",
+            "subtitle": "Keep typing, or check the name in Reminders.app",
+            "valid": False,
+        }]}
+    return {"items": [
+        {"title": name, "subtitle": kind, "valid": False, "autocomplete": f"@{name}"}
+        for name, kind in matches
+    ]}
+
+
+def render_tag_picker(partial, rest=""):
+    needle = partial.lower()
+    matches = sorted(t for t in fetch_known_tags() if needle in t.lower())
+    if not matches:
+        return {"items": [{
+            "title": f'No tag matches "{partial}"' if partial else "No tags found",
+            "subtitle": "Keep typing, or check remctl tags",
+            "valid": False,
+        }]}
+    suffix = f" {rest}" if rest else ""
+    return {"items": [
+        {
+            "title": f"#{tag}",
+            "subtitle": f'Tag — keeps "{rest}" as a filter' if rest else "Tag",
+            "valid": False,
+            "autocomplete": f"#{tag}{suffix}",
+        }
+        for tag in matches
+    ]}
+
+
 def resolve_named_scope(name):
     """Try a real list first, then fall back to a smart list by name.
 
@@ -153,14 +231,28 @@ def fetch_scope(query_tokens):
 
     first = query_tokens[0]
 
-    if first.startswith("#") and len(first) > 1:
-        # Smart-list and list names can contain spaces, so `#` claims the
+    if first.startswith("@"):
+        # Smart-list and list names can contain spaces, so `@` claims the
         # rest of the query as the name rather than just the first token.
         name = " ".join(query_tokens)[1:].strip()
+        if not name:
+            raise PickerNeeded("list", "")
         items, skip_completed_filter, error = resolve_named_scope(name)
         if items is None:
-            raise error
+            raise PickerNeeded("list", name)
         return items, "", skip_completed_filter
+
+    if first.startswith("#"):
+        tag = first[1:]
+        rest = " ".join(query_tokens[1:])
+        if not tag or tag.lower() not in {t.lower() for t in fetch_known_tags()}:
+            raise PickerNeeded("tag", tag, rest)
+        candidate_pool = fetch_all_items()
+        items = [
+            i for i in candidate_pool
+            if tag.lower() in {t.lower() for t in (i.get("tags") or [])}
+        ]
+        return items, " ".join(query_tokens[1:]), False
 
     if first == "all":
         return fetch_all_items(), " ".join(query_tokens[1:]), False
@@ -279,6 +371,17 @@ def render_browse(query):
 
     try:
         items, free_text, skip_completed_filter = fetch_scope(tokens)
+    except PickerNeeded as pick:
+        # A picker's own lists/smart-lists/tags lookup can itself fail
+        # (e.g. no Reminders permission yet), so it needs the same
+        # RemctlError handling as fetch_scope() — a bare except here
+        # wouldn't catch an error raised while rendering the picker below.
+        try:
+            if pick.kind == "list":
+                return render_list_picker(pick.partial)
+            return render_tag_picker(pick.partial, pick.rest)
+        except RemctlError as exc:
+            return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
     except RemctlError as exc:
         return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
 
@@ -291,7 +394,7 @@ def render_browse(query):
     if not alfred_items:
         alfred_items = [{
             "title": "No matching reminders",
-            "subtitle": "Try a different list (#Name), \"all\", or search text",
+            "subtitle": "Try a different list (@Name), tag (#tag), \"all\", or search text",
             "valid": False,
         }]
     return {"items": alfred_items}

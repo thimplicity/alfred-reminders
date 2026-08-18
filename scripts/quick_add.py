@@ -2,12 +2,12 @@
 """Run Script backend for the `remadd` keyword.
 
 Syntax (tokens may appear in any order):
-  remadd <title words...> [#List] [@tag ...] [!priority] [<due phrase>] [notes:<text>]
+  remadd <title words...> [@List] [#tag ...] [!priority] [<due phrase>] [notes:<text>]
 
 Examples:
-  remadd Buy milk #Groceries tomorrow 9am
-  remadd Buy milk #Groceries tom 9am
-  remadd Ship notes #Work !high friday 3pm @errand
+  remadd Buy milk @Groceries tomorrow 9am
+  remadd Buy milk @Groceries tom 9am
+  remadd Ship notes @Work !high friday 3pm #errand
   remadd Pay rent due:2026-06-01 notes:autopay is off this month
 
 A trailing due-date phrase is auto-detected (tomorrow/tom/mon/next
@@ -44,11 +44,11 @@ def parse(query):
 
     for tok in query.split():
         low = tok.lower()
-        if tok.startswith("#") and len(tok) > 1:
+        if tok.startswith("@") and len(tok) > 1:
             mode = None
             list_name = tok[1:]
             continue
-        if tok.startswith("@") and len(tok) > 1:
+        if tok.startswith("#") and len(tok) > 1:
             mode = None
             tags.append(tok[1:])
             continue
