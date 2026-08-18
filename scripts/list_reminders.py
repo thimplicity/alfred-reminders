@@ -123,16 +123,26 @@ def fetch_smart_list_items(smart_list):
 
 
 def resolve_named_scope(name):
-    """Try a real list first, then fall back to a smart list by name."""
+    """Try a real list first, then fall back to a smart list by name.
+
+    Returns (items, skip_completed_filter, error). skip_completed_filter is
+    derived from the resolved smart list's `smartListType`, not from the
+    (possibly localized, e.g. "Terminé") display name the user typed, so
+    the built-in Completed list works regardless of System Settings
+    language.
+    """
     try:
         payload = cached_run(f"scope:list:{name}", ["show", name], ttl=CACHE_TTL)
-        return items_from(payload), None
+        return items_from(payload), False, None
     except RemctlError as list_error:
         smart_lists = cached_run("scope:smart-lists", ["smart-lists"], ttl=CACHE_TTL)
         for sl in smart_lists if isinstance(smart_lists, list) else []:
             if (sl.get("name") or "").lower() == name.lower():
-                return fetch_smart_list_items(sl), None
-        return None, list_error
+                skip_completed_filter = (
+                    sl.get("smartListType") == "com.apple.reminders.smartlist.completed"
+                )
+                return fetch_smart_list_items(sl), skip_completed_filter, None
+        return None, False, list_error
 
 
 def fetch_scope(query_tokens):
@@ -147,10 +157,9 @@ def fetch_scope(query_tokens):
         # Smart-list and list names can contain spaces, so `#` claims the
         # rest of the query as the name rather than just the first token.
         name = " ".join(query_tokens)[1:].strip()
-        items, error = resolve_named_scope(name)
+        items, skip_completed_filter, error = resolve_named_scope(name)
         if items is None:
             raise error
-        skip_completed_filter = name.lower() == "completed"
         return items, "", skip_completed_filter
 
     if first == "all":

@@ -141,42 +141,72 @@ _DUE_UNIT_WORDS = {
     "day", "days", "week", "weeks", "month", "months",
     "hour", "hours", "minute", "minutes", "min", "mins",
 }
-_DUE_TIME_WORDS = {"am", "pm", "noon", "midnight", "morning", "afternoon", "evening", "night", "eod"}
+# Deliberately excludes ambiguous standalone words like "morning"/"night" —
+# too likely to be the last word of an ordinary title ("Movie night").
+_DUE_TIME_ANCHOR_WORDS = {"am", "pm", "noon", "midnight", "eod"}
 _TIME_RE = re.compile(r"\d{1,2}:\d{2}(am|pm)?$")
 _HOUR_RE = re.compile(r"\d{1,2}(am|pm)$")
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}$")
 _RELATIVE_RE = re.compile(r"\+\d+[dwm]$")
+_BARE_INT_RE = re.compile(r"\d{1,4}$")
+
+
+def _due_token_kind(tok):
+    """Classify a token for due-phrase detection, or None if it doesn't
+    plausibly belong to a trailing date/time phrase at all.
+
+    "anchor" tokens are concrete enough to stand alone (a weekday, "9am",
+    an ISO date, ...). "modifier" ("in", "next", "at", ...) and "unit"
+    ("days", "week", ...) tokens only count as part of a due phrase in
+    combination — see split_implicit_due() — so that a title ending in a
+    single stray preposition ("Check in", "Read on") isn't misread as one.
+    """
+    low = tok.lower().strip(",.")
+    if low in _DUE_WEEKDAYS or low in _DUE_DAY_WORDS or low in _DUE_TIME_ANCHOR_WORDS:
+        return "anchor"
+    if _TIME_RE.fullmatch(low) or _HOUR_RE.fullmatch(low) or _ISO_DATE_RE.fullmatch(low) or _RELATIVE_RE.fullmatch(low):
+        return "anchor"
+    if low in _DUE_UNIT_WORDS:
+        return "unit"
+    if low in _DUE_MODIFIER_WORDS:
+        return "modifier"
+    if _BARE_INT_RE.fullmatch(low):
+        return "number"
+    return None
 
 
 def looks_like_due_token(tok):
-    """True if `tok` reads as part of a trailing date/time phrase.
-
-    Deliberately conservative about bare numbers (requires am/pm or a colon)
-    to avoid swallowing an ordinary trailing number in a title, e.g. "Buy 5"
-    should stay a title, not get parsed as a due fragment.
-    """
-    low = tok.lower().strip(",.")
-    if low in _DUE_WEEKDAYS or low in _DUE_DAY_WORDS:
-        return True
-    if low in _DUE_MODIFIER_WORDS or low in _DUE_UNIT_WORDS or low in _DUE_TIME_WORDS:
-        return True
-    if _TIME_RE.fullmatch(low) or _HOUR_RE.fullmatch(low):
-        return True
-    if _ISO_DATE_RE.fullmatch(low) or _RELATIVE_RE.fullmatch(low):
-        return True
-    return False
+    return _due_token_kind(tok) is not None
 
 
 def split_implicit_due(tokens):
     """Greedily peel a trailing due-date phrase off a token list.
 
-    Returns (title_tokens, due_tokens). Always leaves at least one token as
-    the title, even if the whole query looks date-like, so a title that's
+    Returns (title_tokens, due_tokens). Only actually splits if the
+    candidate suffix contains a concrete "anchor" (a weekday, "9am", an ISO
+    date, ...) or a modifier/unit pairing that only makes sense together
+    ("in 3 days", "next week") — a bare trailing modifier or unit word
+    alone ("Check in", "Read on") is left as part of the title instead of
+    being misread as a due phrase. Always leaves at least one token as the
+    title even when the whole query looks date-like, so a title that's
     just "Tomorrow" doesn't turn into an empty-title reminder.
     """
     i = len(tokens)
-    while i > 1 and looks_like_due_token(tokens[i - 1]):
+    kinds = []
+    while i > 1:
+        kind = _due_token_kind(tokens[i - 1])
+        if kind is None:
+            break
+        kinds.append(kind)
         i -= 1
+    kinds.reverse()
+
+    has_anchor = "anchor" in kinds
+    has_numeric_duration = "unit" in kinds and "number" in kinds
+    has_modifier_unit = "modifier" in kinds and "unit" in kinds
+    if not (has_anchor or has_numeric_duration or has_modifier_unit):
+        return tokens, []
+
     return tokens[:i], tokens[i:]
 
 
