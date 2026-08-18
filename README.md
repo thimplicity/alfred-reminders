@@ -144,6 +144,15 @@ that doesn't mutate anything.
 There's no delete anywhere in this workflow — use Reminders.app directly
 for that.
 
+**Confirmation step**: every mutation (Mark as complete, Reschedule,
+Change title, Move to another list) shows a one-line summary — "Mark
+'Buy milk' as complete", "Move 'Buy milk' to 'Groceries'" — that needs one
+more Return before it actually calls `remctl`. This is on by default; set
+the `CONFIRM_CHANGES` workflow variable to `0` (Alfred's workflow
+configuration sheet, or edit `info.plist`'s top-level `variables` dict) to
+skip straight to executing instead. Open/View details are never confirmed
+— they don't change anything.
+
 Reschedule accepts `tomorrow`, `tom`, `next friday`, `2026-06-01`, `clear`,
 etc. — same trailing-phrase parsing as `remadd`'s due-date detection below.
 
@@ -220,10 +229,11 @@ A macOS notification confirms success or reports the failure.
 
 Two objects per keyword, one plain connection each — no modifier-gated
 routing anywhere. `list_reminders.py` handles browse, the Tab-triggered
-action menu, the edit/reschedule/move text-entry prompts and picker, *and*
-the read-only details screen all in one script, branching on a prefix in
-the query string itself (`menu:<id>`, `edit:<id>:<text>`, `due:<id>:<text>`,
-`movelist:<id>:<text>`, `view:<id>` — see the module docstring). Only the
+action menu, the edit/reschedule/move text-entry prompts and picker, the
+read-only details screen, *and* the confirm-step summary all in one
+script, branching on a prefix in the query string itself (`menu:<id>`,
+`edit:<id>:<text>`, `due:<id>:<text>`, `movelist:<id>:<text>`, `view:<id>`,
+`confirm:<action>:<id>:<value>` — see the module docstring). Only the
 terminal actions (open/complete/edit/reschedule/move) reach
 `reminder_action.py`, which is the only script that actually calls
 `remctl` to mutate anything — `view:<id>` never does, it only reads.
@@ -281,6 +291,8 @@ python3 list_reminders.py "edit:23880:New title"            # edit text-entry pr
 python3 list_reminders.py "due:23880:tom 9am"                # reschedule text-entry preview
 python3 list_reminders.py "movelist:23880:Gro"                 # move-to-list picker preview
 python3 list_reminders.py "view:23880"                           # read-only detail screen
+python3 list_reminders.py "confirm:done:23880:"                    # confirm-step preview
+CONFIRM_CHANGES=0 python3 list_reminders.py "edit:23880:New title"   # with confirm disabled
 action=done reminder_id=23880 python3 reminder_action.py
 python3 quick_add.py "Buy milk @Groceries tomorrow 9am"
 ```
