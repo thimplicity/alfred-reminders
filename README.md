@@ -82,9 +82,9 @@ filter, same as `flagged`/`overdue`.
 **Live picker**: typing `@` or `#` with no exact match yet — rather than
 erroring on partial text — shows every list/smart-list or tag whose name
 contains what you've typed so far (`@` with nothing after it lists
-everything). Selecting one (Return) fills in the exact name and immediately
-shows that scope, since these are `autocomplete` items rather than an
-action — no separate confirm step needed.
+everything). These are `valid: false` `autocomplete` items, so Tab (not
+Return) fills in the exact name and immediately shows that scope — no
+separate confirm step needed.
 
 **Smart lists**: `remctl` can inspect a smart list's filter definition but
 has no command to fetch its live contents, so `@Name` tries a real list
@@ -103,7 +103,7 @@ not exhaustively against every filter kind Reminders supports.
 | Key | Action |
 |---|---|
 | Return | Open in Reminders.app |
-| ⇧ Return | Mark complete |
+| ⇧ Return | Mark complete — **only when `CONFIRM_CHANGES=0`**; otherwise Shift is unbound (falls back to the default Return/open) and completing goes through the menu instead, since a modifier can't drill into the confirm step |
 | ⇥ Tab | Open the action menu for that reminder |
 
 Tab, not Right Arrow — per Alfred's own docs, an item's `autocomplete`
@@ -129,12 +129,13 @@ Reschedule, change-title, move, and view-details all need a follow-up
 value or more screen space than a modifier+Return can give (a modifier is
 a one-shot fire-and-forget action, not an interactive prompt or a second
 screen), which is why they live in the menu rather than on a modifier
-key. Tab into the menu, then Tab or Return on "Reschedule…" / "Change
+key. Tab into the menu, then Tab again on "Reschedule…" / "Change
 title…" / "Move to another list…" / "View details" drops you into a
-text-entry prompt, picker, or read-only detail screen. To back out of any
-of these without finishing, just backspace the query text (it's plain
-editable text at that point, e.g. `menu:3724` or `edit:3724:`) back down
-to `rem` and continue browsing.
+text-entry prompt, picker, or read-only detail screen — these are
+`valid: false` items, so only Tab applies their `autocomplete`; Return
+does nothing on them. To back out of any of these without finishing, just
+backspace the query text (it's plain editable text at that point, e.g.
+`menu:3724` or `edit:3724:`) back down to `rem` and continue browsing.
 
 **View details** shows title, list, due date, priority, flag, tags, and
 notes as a read-only screen (Return on any line just opens the reminder
@@ -209,9 +210,10 @@ remadd <title words...> [@List] [#tag ...] [!priority] [<due phrase>] [notes:<te
 **Live completion**: `remadd` is a Script Filter, so it re-renders on every
 keystroke. Whenever the word you're currently typing starts with `@`, `#`,
 or `!` (and you haven't closed it with a space yet), it shows matching
-lists, tags, or priorities instead of the usual preview — Tab or Return on
-one fills in just that word and puts the cursor back at the end so you
-keep typing the rest (`@Groceries `, then continue with `tomorrow 9am`).
+lists, tags, or priorities instead of the usual preview — Tab on one fills
+in just that word and puts the cursor back at the end so you keep typing
+the rest (`@Groceries `, then continue with `tomorrow 9am`); these rows
+are `valid: false`, so Return doesn't apply the completion.
 The `@` picker only offers single-word real lists (smart lists aren't
 valid add targets, and multi-word names aren't representable in this
 inline shorthand anyway). Once a word is closed with a space, normal

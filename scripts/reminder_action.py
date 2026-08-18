@@ -18,6 +18,14 @@ from _remctl import CACHE_DIR, RemctlError, normalize_date_phrase, run
 _TAG_TOKEN_RE = re.compile(r"(?:(?<=\s)|^)#(\S+) ?")
 
 
+def clear_cache():
+    for path in glob.glob(os.path.join(CACHE_DIR, "*.json")):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def extract_tags(text):
     """Pull #tag tokens out of edited-title text so they become real synced
     tags (via --private -t) instead of literal "#tag" characters left in
