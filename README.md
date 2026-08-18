@@ -18,6 +18,30 @@ The object graph is intentionally minimal now (two keywords, each with one
 plain connection, no modifier-gated routing) specifically to keep that risk
 small.
 
+**Security note**: every script object that embeds `"{query}"` directly
+into a `/bin/bash`-interpreted command line needs escaping configured,
+otherwise a query containing shell metacharacters would have that command
+executed by bash before Python ever starts, under Alfred's own
+permissions. Concretely reachable on this branch: the `@`/`#` picker's
+`autocomplete` values are built directly from list and tag names
+(`f"@{name}"` / `f"#{tag}"` in `render_list_picker()`/`render_tag_picker()`
+— see `scripts/list_reminders.py`), and a list can be renamed by anyone
+it's shared with over iCloud. A shared list renamed to `$(command)` would
+show up as a picker entry when the local user types `rem @` — typing
+alone doesn't trigger anything, since the malicious name only lives in
+that entry's `autocomplete` field at that point. Selecting it (Tab, which
+replaces the query with that value) is what puts the name into `{query}`
+on the *next* invocation, and that's the point bash evaluates it. All three
+script-bearing objects that do this
+(the `rem` Script Filter and both Run Scripts — `remadd`'s Keyword Input
+doesn't embed `{query}` in a script string at all, so it isn't affected)
+now set `escaping: 102` (verified against a deanishe benchmark plist built
+for exactly this class of input, and against real third-party workflows on
+this machine using the same value for the same
+`"{query}"`-in-shell-argument pattern) to escape
+backquotes/dollars/double-quotes/backslashes before substitution. If you
+ever add a new script object with `"{query}"` in it, set this too.
+
 ## Setup
 
 ### 1. Install remctl
