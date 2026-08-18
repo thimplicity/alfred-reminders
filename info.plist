@@ -43,7 +43,7 @@
 				<key>runningsubtext</key>
 				<string>Searching reminders…</string>
 				<key>subtext</key>
-				<string>Type to search, @List for a list/smart list, #tag, "all", "upcoming", "flagged" — Right Arrow for actions</string>
+				<string>Type to search, @List for a list/smart list, #tag, "all", "upcoming", "flagged" — Tab for actions</string>
 				<key>type</key>
 				<integer>0</integer>
 				<key>script</key>

@@ -105,16 +105,24 @@ not exhaustively against every filter kind Reminders supports.
 | Return | Open in Reminders.app |
 | ⇧ Return | Mark complete |
 | ⌃⌥⌘ Return | Delete (no undo) |
-| → (Right Arrow) or Tab | Open the action menu for that reminder |
+| ⇥ Tab | Open the action menu for that reminder |
+
+Tab, not Right Arrow — per Alfred's own docs, an item's `autocomplete`
+field is specifically Tab-triggered for a `valid: true` item (which browse
+results are, since Return already does something else on them). An
+earlier version of this README incorrectly said Right Arrow worked too;
+it doesn't for a plain Script Filter result.
 
 The action menu (Open / Complete / Edit title / Reschedule / Move to list /
 Delete) is where editing, rescheduling, and moving live, rather than on a
 modifier key — all three need you to type or pick a follow-up value, and a
 modifier+Return is a one-shot fire-and-forget action with no way to open a
-text box or picker afterward. Right Arrow into the menu, then Right Arrow
-or Return on "Edit title…" / "Reschedule…" / "Move to list…" drops you
-into a text-entry prompt or picker (Left Arrow to back out, same as any
-Alfred drill-down).
+text box or picker afterward. Tab into the menu, then Tab or Return on
+"Edit title…" / "Reschedule…" / "Move to list…" drops you into a
+text-entry prompt or picker. To back out of any of these without
+finishing, just backspace the query text (it's plain editable text at that
+point, e.g. `menu:3724` or `edit:3724:`) back down to `rem` and continue
+browsing.
 
 Reschedule accepts `tomorrow`, `tom`, `next friday`, `2026-06-01`, `clear`,
 etc. — same trailing-phrase parsing as `remadd`'s due-date detection below.
@@ -198,12 +206,13 @@ imported workflow misbehaves, it's almost certainly the hand-authored
   points at `/usr/bin/python3 scripts/<name>.py "{query}"` and the
   language dropdown is set to `/bin/bash` (the script text itself invokes
   python3, so bash is just the outer shell).
-- **Right Arrow doesn't open the menu**: confirm the `rem` Script Filter
-  item actually carries an `autocomplete` value (it should — check by
-  running `python3 scripts/list_reminders.py ""` directly and confirming
-  each item has `"autocomplete": "menu:<id>"`); if the JSON is right but
-  Alfred still doesn't drill in, this is an Alfred-side quirk to report
-  rather than a workflow bug.
+- **Tab doesn't open the menu**: confirm the `rem` Script Filter item
+  actually carries an `autocomplete` value (it should — check by running
+  `python3 scripts/list_reminders.py ""` directly and confirming each item
+  has `"autocomplete": "menu:<id>"`); if the JSON is right but Alfred still
+  doesn't drill in on Tab, that's an Alfred-side quirk to report rather
+  than a workflow bug. (Right Arrow is *not* the trigger — Alfred's own
+  docs specify Tab for the `autocomplete` field on a `valid: true` item.)
 - **"remctl not found"**: confirm `~/bin/remctl` exists, or set a
   `REMCTL_PATH` workflow variable to the correct path.
 - **Permission errors**: see "Grant permissions" above — remember Alfred
