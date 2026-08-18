@@ -7,12 +7,16 @@ Create, search, complete, and edit Apple Reminders from Alfred, backed by
 ## Status
 
 This is a hand-built scaffold: the Python scripts under `scripts/` are
-tested standalone (see "Testing the scripts directly" below) and are the
-part to trust. `info.plist` is a best-effort, hand-authored Alfred workflow
-definition — it has **not** been round-tripped through the actual Alfred
-app, since this was built in a headless session with no GUI access. Import
-it, then sanity-check each piece against "If something's not wired right"
-below before relying on it.
+tested standalone (see "Testing the scripts directly" below) against real
+Reminders data, including full create/edit/reschedule/complete/delete
+cycles, and are the part to trust. `info.plist` is a best-effort,
+hand-authored Alfred workflow definition — it has **not** been
+round-tripped through the actual Alfred app, since this was built in a
+headless session with no GUI access. Import it, then sanity-check each
+piece against "If something's not wired right" below before relying on it.
+The object graph is intentionally minimal now (two keywords, each with one
+plain connection, no modifier-gated routing) specifically to keep that risk
+small.
 
 ## Setup
 
@@ -62,28 +66,52 @@ structure" below; the scripts themselves don't change.
 |---|---|
 | `rem` (empty) | Due today + overdue |
 | `rem <text>` | Full-text search (title + notes) across all lists |
-| `rem #List` | Everything in one list |
-| `rem #List <text>` | That list, filtered by `<text>` |
+| `rem #List` | Everything in one list — or one **smart list** (see below) |
 | `rem all` | Every open reminder, across every list |
 | `rem all <text>` | Same, filtered by `<text>` |
 | `rem upcoming [N]` | Due within N days (default 7) |
 | `rem flagged` | Flagged reminders |
 | `rem overdue` | Overdue only |
 
-Row actions (modifier keys):
+`#` claims the *rest* of the query as the name, so multi-word list/smart-list
+names work: `rem #Sometime - AI`, `rem #Don't Forget Me`.
+
+**Smart lists**: `remctl` can inspect a smart list's filter definition but
+has no command to fetch its live contents, so `#Name` tries a real list
+first and, if none matches, looks up a smart list by that name and
+re-implements its filter (tags, date range, priority, flagged) client-side
+against every reminder in every list — see `matches_smart_list()` in
+`scripts/_remctl.py`. Apple's built-in smart lists (Today, Urgent, All,
+Completed) map straight onto equivalent remctl commands instead of being
+filter-emulated. This is best-effort: unusual filter shapes may not match
+exactly what Reminders.app itself would show — verified against this
+machine's actual smart lists (tag/priority/date/flagged combinations), but
+not exhaustively against every filter kind Reminders supports.
+
+### Row navigation
 
 | Key | Action |
 |---|---|
 | Return | Open in Reminders.app |
 | ⇧ Return | Mark complete |
-| ⌥ Return | Edit title (opens a second prompt — type the new title, Return to confirm) |
-| ⌃ Return | Reschedule (opens a second prompt — type a new due date, e.g. `tomorrow 9am`, `next friday`, or `clear`; Return to confirm) |
 | ⌃⌥⌘ Return | Delete (no undo) |
+| → (Right Arrow) or Tab | Open the action menu for that reminder |
+
+The action menu (Open / Complete / Edit title / Reschedule / Delete) is
+where editing and rescheduling live, rather than on a modifier key —
+retitling or rescheduling both need you to type a follow-up value, and a
+modifier+Return is a one-shot fire-and-forget action with no way to open a
+text box afterward. Right Arrow into the menu, then Right Arrow or Return
+on "Edit title…" / "Reschedule…" drops you into a text-entry prompt (Left
+Arrow to back out, same as any Alfred drill-down).
+
+Reschedule accepts `tomorrow`, `tom`, `next friday`, `2026-06-01`, `clear`,
+etc. — same trailing-phrase parsing as `remadd`'s due-date detection below.
 
 ### `remadd` — quick add
 
 ```
-remadd <title words...> [#List] [@tag ...] [!priority] [due:<phrase>] [notes:<text>]
+remadd <title words...> [#List] [@tag ...] [!priority] [<due phrase>] [notes:<text>]
 ```
 
 - `#List` — target list (single word; lists with spaces in the name aren't
@@ -92,16 +120,25 @@ remadd <title words...> [#List] [@tag ...] [!priority] [due:<phrase>] [notes:<te
   appended to the title (remctl limitation, not a synced tag) — see
   "Extending" below if you want real synced tags
 - `!priority` — `!high` / `!medium` / `!low` (or `!h`/`!m`/`!l`)
-- `due:<phrase>` — everything after `due:` through the end of the query (or
-  up to the next `#`/`@`/`!`/`notes:` token) is passed straight to remctl's
-  date parser: `tomorrow 9am`, `next friday`, `2026-06-01`, `+3d`, etc.
-- `notes:<text>` — same trailing-phrase rule, for the reminder's notes
+- A trailing due-date phrase is **auto-detected** — no `due:` marker
+  needed: `tomorrow`, `tom`, `next friday`, `9am`, `2026-06-01`, `+3d`, etc.
+  This is a heuristic (see `looks_like_due_token()` in `scripts/_remctl.py`)
+  and conservative about bare numbers specifically to avoid misreading an
+  ordinary trailing number in a title (`Buy 5 apples` stays a title). If a
+  title genuinely ends in a date-like word and gets misparsed, use an
+  explicit `due:<phrase>` prefix to disambiguate — it still works and
+  always wins over the heuristic.
+- `notes:<text>` — everything after `notes:` through the end of the query
+  (or up to the next recognized token) becomes the reminder's notes; never
+  auto-detected, since free text can't be told apart from a due phrase by
+  pattern alone
 
 Examples:
 
 ```
-remadd Buy milk #Groceries due:tomorrow 9am
-remadd Ship notes #Work !high due:friday 3pm @errand
+remadd Buy milk #Groceries tomorrow 9am
+remadd Buy milk #Groceries tom 9am
+remadd Ship notes #Work !high friday 3pm @errand
 remadd Pay rent due:2026-06-01 notes:autopay is off this month
 ```
 
@@ -111,23 +148,20 @@ A macOS notification confirms success or reports the failure.
 
 ```
 [rem, keyword]  Script Filter          scripts/list_reminders.py
-      │ (Return / ⇧ / ⌃⌥⌘, default connection)
-      ├──────────────────────────────▶ Run Script   scripts/reminder_action.py
-      │ (⌥ Edit)
-      ├───▶ Script Filter (no keyword)  scripts/prompt_for_text.py
-      │              │ (Return, default connection)
-      │              └──────────────────────────────▶ (same Run Script above)
-      │ (⌃ Reschedule)
-      └───▶ (same prompt_for_text.py node, action=reschedule)
+      │ (Return / ⇧ / ⌃⌥⌘, default connection — the only connection)
+      └──────────────────────────────▶ Run Script   scripts/reminder_action.py
 
 [remadd, keyword]  ──▶ Run Script       scripts/quick_add.py
 ```
 
-`prompt_for_text.py` doesn't call remctl — it just echoes what you're
-typing back as a confirmable item, carrying the `action` (`edit` or
-`reschedule`) and `reminder_id` variables set by whichever modifier routed
-you there. `reminder_action.py` is the only script that actually mutates
-data; it branches on the `action` variable.
+Two objects per keyword, one plain connection each — no modifier-gated
+routing anywhere. `list_reminders.py` handles browse, the Right-Arrow
+action menu, *and* the edit/reschedule text-entry prompts all in one
+script, branching on a prefix in the query string itself (`menu:<id>`,
+`edit:<id>:<text>`, `due:<id>:<text>` — see the module docstring). Only the
+terminal actions (open/complete/edit/reschedule/delete) reach
+`reminder_action.py`, which is the only script that actually calls
+`remctl` to mutate anything.
 
 ## If something's not wired right
 
@@ -139,14 +173,23 @@ imported workflow misbehaves, it's almost certainly the hand-authored
   points at `/usr/bin/python3 scripts/<name>.py "{query}"` and the
   language dropdown is set to `/bin/bash` (the script text itself invokes
   python3, so bash is just the outer shell).
-- **⌥/⌃ don't do anything special**: the alternate connections from the
-  `rem` Script Filter to the "Edit / Reschedule" node need to be drawn
-  while holding Option / Control respectively — redraw them in the
-  connection view if they're missing or point at the wrong modifier.
+- **Right Arrow doesn't open the menu**: confirm the `rem` Script Filter
+  item actually carries an `autocomplete` value (it should — check by
+  running `python3 scripts/list_reminders.py ""` directly and confirming
+  each item has `"autocomplete": "menu:<id>"`); if the JSON is right but
+  Alfred still doesn't drill in, this is an Alfred-side quirk to report
+  rather than a workflow bug.
 - **"remctl not found"**: confirm `~/bin/remctl` exists, or set a
   `REMCTL_PATH` workflow variable to the correct path.
 - **Permission errors**: see "Grant permissions" above — remember Alfred
   needs its own grant, separate from any terminal you tested in.
+- **The Alfred window won't close / an action fires repeatedly**: this was
+  a real bug in an earlier version (`vitoclose` was set on every
+  connection, which vetoes Alfred's normal window-close behavior) — the
+  current `info.plist` doesn't set it anywhere. If it recurs after you've
+  edited the workflow in Alfred's GUI, check the connection's config
+  popover for an accidentally-checked "This connection can veto Alfred's
+  window closing" box.
 
 ## Testing the scripts directly
 
@@ -154,11 +197,14 @@ No Alfred needed for this — they're plain argv/env scripts:
 
 ```bash
 cd scripts
-python3 list_reminders.py ""                     # today + overdue
-python3 list_reminders.py "#Work"                 # one list
-python3 list_reminders.py "milk"                  # search
+python3 list_reminders.py ""                        # today + overdue
+python3 list_reminders.py "#Work"                    # one list or smart list
+python3 list_reminders.py "milk"                      # search
+python3 list_reminders.py "menu:23880"                 # action menu for one reminder
+python3 list_reminders.py "edit:23880:New title"        # edit text-entry preview
+python3 list_reminders.py "due:23880:tom 9am"            # reschedule text-entry preview
 action=done reminder_id=23880 python3 reminder_action.py
-python3 quick_add.py "Buy milk #Groceries due:tomorrow 9am"
+python3 quick_add.py "Buy milk #Groceries tomorrow 9am"
 ```
 
 ## Extending
@@ -167,8 +213,16 @@ python3 quick_add.py "Buy milk #Groceries due:tomorrow 9am"
   all of this behind `--private` (unsupported private ReminderKit writes).
   `quick_add.py` and `reminder_action.py` are the two places to add
   `--private` and the relevant flags.
-- **Caching**: scope-level fetches (`today`, `all`, `#List`, `upcoming`)
-  are cached for `REMCTL_CACHE_TTL` seconds (default 5, set as a workflow
-  variable) under `~/Library/Caches/com.alfredapp.reminders`. Free-text
-  search is never cached since the query changes every keystroke.
-  `reminder_action.py` clears the cache after every mutation.
+- **Caching**: scope-level fetches (`today`, `all`, `#List`, `upcoming`,
+  smart-list emulation's underlying "all" fetch) are cached for
+  `REMCTL_CACHE_TTL` seconds (default 5, set as a workflow variable) under
+  `~/Library/Caches/com.alfredapp.reminders`. Free-text search and the
+  menu/text-entry modes are never cached. `reminder_action.py` clears the
+  cache after every mutation.
+- **Smart-list filter coverage**: `matches_smart_list()` in
+  `scripts/_remctl.py` handles tags (any/all/exclude/untagged), date
+  (no-date, relative range with/without past-due), priority, and flagged
+  filters, combined with `and`/`or`. Reminders' smart-list filter UI
+  supports more filter kinds over time; unrecognized filter keys are
+  currently ignored (treated as "always matches"), which can make a smart
+  list look broader in Alfred than it does in Reminders.app.

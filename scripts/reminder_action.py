@@ -3,15 +3,16 @@
 
 Reads `action` and `reminder_id` from the environment (set as Alfred
 workflow variables by the triggering item/mod) and `{query}` as argv[1],
-which is only meaningful for edit/reschedule (the text typed into
-prompt_for_text.py). Clears the scope-fetch cache after any mutation so the
-next `rem` keystroke reflects the change immediately.
+which is only meaningful for edit/reschedule (the text typed into the
+list_reminders.py menu/text-entry modes). Clears the scope-fetch cache
+after any mutation so the next `rem` keystroke reflects the change
+immediately.
 """
 import glob
 import os
 import sys
 
-from _remctl import CACHE_DIR, RemctlError, run
+from _remctl import CACHE_DIR, RemctlError, normalize_date_phrase, run
 
 
 def clear_cache():
@@ -47,7 +48,7 @@ def main():
             if not typed_text:
                 print("No date entered — reschedule cancelled.", file=sys.stderr)
                 sys.exit(1)
-            run(["edit", reminder_id, "-d", typed_text], json_output=False)
+            run(["edit", reminder_id, "-d", normalize_date_phrase(typed_text)], json_output=False)
         else:
             print(f"Unknown action: {action}", file=sys.stderr)
             sys.exit(1)
