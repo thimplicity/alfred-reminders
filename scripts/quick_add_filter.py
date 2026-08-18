@@ -142,18 +142,17 @@ def render_preview(query):
             "valid": False,
         }]}
 
-    meta = []
-    if parsed["list"]:
-        meta.append(f"@{parsed['list']}")
-    if parsed["tags"]:
-        meta.append(" ".join(f"#{t}" for t in parsed["tags"]))
-    if parsed["priority"]:
-        meta.append(f"!{parsed['priority']}")
-    if parsed["due"]:
-        meta.append(f"due {parsed['due']}")
-    if parsed["notes"]:
-        meta.append(f"notes: {parsed['notes']}")
-    subtitle = "↩ to add" + (" — " + "  ·  ".join(meta) if meta else "")
+    # Show all five slots every time, not just the ones already filled in —
+    # otherwise there's nothing on screen reminding you the @/#/!/due/notes:
+    # syntax exists until you've already used it once.
+    meta = [
+        f"@{parsed['list']}" if parsed["list"] else "@list",
+        " ".join(f"#{t}" for t in parsed["tags"]) if parsed["tags"] else "#tag",
+        f"!{parsed['priority']}" if parsed["priority"] else "!priority",
+        f"due {parsed['due']}" if parsed["due"] else "due",
+        f"notes: {parsed['notes']}" if parsed["notes"] else "notes:",
+    ]
+    subtitle = "↩ to add — " + "  ·  ".join(meta)
 
     return {"items": [{
         "title": parsed["title"],
