@@ -20,6 +20,8 @@
 	<dict>
 		<key>REMCTL_CACHE_TTL</key>
 		<string>5</string>
+		<key>CONFIRM_CHANGES</key>
+		<string>1</string>
 	</dict>
 	<key>variablesdontexport</key>
 	<array/>
@@ -51,7 +53,7 @@
 				<key>scriptargtype</key>
 				<integer>0</integer>
 				<key>argumenttype</key>
-				<integer>0</integer>
+				<integer>1</integer>
 				<key>escaping</key>
 				<integer>102</integer>
 			</dict>

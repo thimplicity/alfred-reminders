@@ -23,6 +23,18 @@ def clear_cache():
             pass
 
 
+def extract_tags(text):
+    """Pull #tag tokens out of edited-title text so they become real synced
+    tags (via --private -t) instead of literal "#tag" characters left in
+    the title — plain `edit --title` never auto-converts hashtag-looking
+    text into a tag, verified directly against a real reminder.
+    """
+    words = text.split()
+    tags = [w[1:] for w in words if w.startswith("#") and len(w) > 1]
+    title_words = [w for w in words if not (w.startswith("#") and len(w) > 1)]
+    return " ".join(title_words).strip(), tags
+
+
 def main():
     action = os.environ.get("action")
     reminder_id = os.environ.get("reminder_id")
@@ -37,13 +49,18 @@ def main():
             run(["open", reminder_id], json_output=False)
         elif action == "done":
             run(["done", reminder_id], json_output=False)
-        elif action == "delete":
-            run(["delete", reminder_id, "--force"], json_output=False)
         elif action == "edit":
             if not typed_text:
                 print("No title entered — edit cancelled.", file=sys.stderr)
                 sys.exit(1)
-            run(["edit", reminder_id, "--title", typed_text], json_output=False)
+            new_title, tags = extract_tags(typed_text)
+            if not new_title:
+                print("No title text (only tags) — edit cancelled.", file=sys.stderr)
+                sys.exit(1)
+            args = ["edit", reminder_id, "--title", new_title]
+            if tags:
+                args += ["--private", "-t", ",".join(tags)]
+            run(args, json_output=False)
         elif action == "reschedule":
             if not typed_text:
                 print("No date entered — reschedule cancelled.", file=sys.stderr)

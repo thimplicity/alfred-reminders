@@ -9,6 +9,12 @@ does the current query string look like":
   menu:<id>           reached via Tab              -> action menu for one item
   edit:<id>:<text>     reached via the menu         -> retitle, typing <text>
   due:<id>:<text>      reached via the menu         -> reschedule, typing <text>
+  movelist:<id>:<text> reached via the menu         -> move, picking a list
+  view:<id>            reached via the menu         -> read-only detail screen
+  confirm:<action>:<id>:<value>  reached from a menu action or a filled-in
+                       text entry/picker              -> one-line summary,
+                       one more Return actually executes it (skip via the
+                       CONFIRM_CHANGES=0 workflow variable)
 
 Browse-mode scope grammar (all optional, space separated):
   rem                     -> due today + overdue (remctl today)
@@ -31,18 +37,23 @@ selecting one (Return, since these are `valid: false` items with an
 `autocomplete`) fills in the exact name and re-renders that scope
 immediately. See render_list_picker()/render_tag_picker().
 
-Row modifiers in browse mode: Return=open, Shift=complete,
-Ctrl+Option+Cmd=delete (all fast paths that need no further input). Tab
-drills into the action menu, which is also where edit/reschedule/move
-live, since those need a follow-up text entry or picker that a
-modifier+Return can't provide (a modifier is a one-shot fire, not an
+Row modifiers in browse mode: Return=open, Shift=complete (fast paths
+that need no further input; there's no delete anywhere in this workflow —
+use Reminders.app for that). Tab drills into the action menu, which is
+also where reschedule/change-title/move/view-details live, since those
+need a follow-up text entry, picker, or just more screen space than a
+modifier+Return can provide (a modifier is a one-shot fire, not an
 interactive prompt). Per Alfred's own docs, an item's "autocomplete" field
 is a Tab-triggered behavior specifically — an earlier version of this
 workflow incorrectly documented Right Arrow as equivalent, which it isn't
-for a plain Script Filter item.
+for a plain Script Filter item. Right Arrow itself is a fixed Alfred
+behavior tied only to native file/folder results ("Show list of available
+Actions... in File System Navigation" per Alfred's cheatsheet) — it isn't
+available to hook into for a custom Script Filter's own results at all.
 """
 import datetime as dt
 import json
+import os
 import re
 import sys
 
@@ -61,6 +72,16 @@ MENU_RE = re.compile(r"^menu:(\d+)$")
 EDIT_RE = re.compile(r"^edit:(\d+):(.*)$", re.DOTALL)
 DUE_RE = re.compile(r"^due:(\d+):(.*)$", re.DOTALL)
 MOVE_RE = re.compile(r"^movelist:(\d+):(.*)$", re.DOTALL)
+VIEW_RE = re.compile(r"^view:(\d+)$")
+CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|move):(\d+):(.*)$", re.DOTALL)
+
+
+def confirm_enabled():
+    """Controlled by the CONFIRM_CHANGES workflow variable (on by default)
+    — set it to 0/false/no in the workflow's variables to skip straight to
+    executing mutations instead of reviewing a one-line summary first.
+    """
+    return os.environ.get("CONFIRM_CHANGES", "1").strip().lower() not in ("0", "false", "no", "")
 
 
 # ---------------------------------------------------------------------------
@@ -359,10 +380,6 @@ def build_browse_item(item):
                 "subtitle": f"Complete “{title}”",
                 "variables": dict(base_vars, action="done"),
             },
-            "cmd+alt+ctrl": {
-                "subtitle": f"Delete “{title}” — cannot be undone",
-                "variables": dict(base_vars, action="delete"),
-            },
         },
     }
 
@@ -406,12 +423,12 @@ def render_browse(query):
 
 
 MENU_ACTIONS = [
-    ("Open in Reminders.app", "open", None, None),
-    ("Complete", "done", None, None),
-    ("Edit title…", None, "edit", "type a new title"),
-    ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am"),
-    ("Move to list…", None, "movelist", "type or pick a list"),
-    ("Delete — cannot be undone", "delete", None, None),
+    ("Mark as complete", "done", None, None, False, True),
+    ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am", False, None),
+    ("Change title…", None, "edit", "type a new title, or add #tag to tag it", True, None),
+    ("Move to another list…", None, "movelist", "type or pick a list", False, None),
+    ("View details", None, "view", "see notes, priority, flag, and tags", None, None),
+    ("Open in Reminders.app", "open", None, None, False, False),
 ]
 
 
@@ -423,8 +440,20 @@ def render_menu(reminder_id):
 
     title = info.get("title") or f"#{reminder_id}"
     items = []
-    for label, action, drill_prefix, hint in MENU_ACTIONS:
-        if action:
+    for label, action, drill_prefix, hint, prefill_title, needs_confirm in MENU_ACTIONS:
+        if action and needs_confirm and confirm_enabled():
+            # "Mark as complete" is the only menu entry that both mutates
+            # and fires with no further typing, so it's the only one that
+            # needs its own confirm drill-in here — edit/reschedule/move
+            # route through confirm from render_text_input()/
+            # render_move_picker() instead, once a value exists to show.
+            items.append({
+                "title": label,
+                "subtitle": f"“{title}” — review before confirming",
+                "valid": False,
+                "autocomplete": f"confirm:{action}:{reminder_id}:",
+            })
+        elif action:
             items.append({
                 "title": label,
                 "subtitle": f"“{title}”",
@@ -436,22 +465,67 @@ def render_menu(reminder_id):
                     "reminder_title": title,
                 },
             })
-        else:
+        elif prefill_title is None:
+            # View details is direct navigation, not a text-entry drill —
+            # no trailing ":text" slot to fill in.
             items.append({
                 "title": label,
                 "subtitle": f"“{title}” — {hint}",
                 "valid": False,
-                "autocomplete": f"{drill_prefix}:{reminder_id}:",
+                "autocomplete": f"{drill_prefix}:{reminder_id}",
+            })
+        else:
+            # Change-title prefills the current title so adding a #tag (or
+            # a small tweak) doesn't require retyping the whole thing —
+            # reschedule/move don't prefill, since a stale due date or list
+            # name isn't a useful starting point for either.
+            prefill = title if prefill_title else ""
+            items.append({
+                "title": label,
+                "subtitle": f"“{title}” — {hint}",
+                "valid": False,
+                "autocomplete": f"{drill_prefix}:{reminder_id}:{prefill}",
             })
     return {"items": items}
 
 
+def render_view(reminder_id):
+    try:
+        info = run(["info", reminder_id], json_output=True)
+    except RemctlError as exc:
+        return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
+
+    title = info.get("title") or f"#{reminder_id}"
+    base_vars = {"reminder_id": reminder_id, "reminder_title": title, "action": "open"}
+
+    lines = [
+        ("Title", title),
+        ("List", info.get("list") or "—"),
+        ("Due", humanize_due(info)),
+        ("Priority", (info.get("priority") or "none").capitalize()),
+        ("Flagged", "Yes" if info.get("flagged") else "No"),
+        ("Tags", ", ".join(info.get("tags") or []) or "none"),
+        ("Notes", info.get("notes") or "none"),
+    ]
+    return {"items": [
+        {
+            "title": f"{label}: {value}",
+            "subtitle": "↩ to open in Reminders.app",
+            "arg": reminder_id,
+            "valid": True,
+            "variables": dict(base_vars),
+        }
+        for label, value in lines
+    ]}
+
+
 def render_move_picker(reminder_id, partial):
-    """Unlike edit/reschedule, moving a reminder doesn't need a free-text
-    confirm step — picking a list name from the (live-filtered) options is
-    itself the complete action, so matches are `valid: true` here rather
-    than another drill-in. Smart lists are excluded since they're filtered
-    views, not real containers a reminder can be moved into.
+    """Picking a list name from the (live-filtered) matches is the whole
+    input needed for a move — no separate free-text step like edit/
+    reschedule. Smart lists are excluded since they're filtered views, not
+    real containers a reminder can be moved into. When confirmation is
+    enabled, picking a match still drills one more step into confirm:...
+    rather than firing immediately.
     """
     needle = partial.lower()
     matches = sorted(
@@ -464,6 +538,16 @@ def render_move_picker(reminder_id, partial):
             "subtitle": "Keep typing, or check the name in Reminders.app",
             "valid": False,
         }]}
+    if confirm_enabled():
+        return {"items": [
+            {
+                "title": name,
+                "subtitle": "↩ or Tab to review before confirming",
+                "valid": False,
+                "autocomplete": f"confirm:move:{reminder_id}:{name}",
+            }
+            for name in matches
+        ]}
     return {"items": [
         {
             "title": name,
@@ -476,14 +560,45 @@ def render_move_picker(reminder_id, partial):
     ]}
 
 
-def render_text_input(reminder_id, action, typed_text, prompt_hint):
-    item = {
-        "title": typed_text if typed_text else f"Type {prompt_hint}…",
-        "subtitle": f"↩ to confirm ({action})",
-        "arg": typed_text,
-        "valid": bool(typed_text),
-        "variables": {"action": action, "reminder_id": reminder_id},
+def render_confirm(action, reminder_id, value):
+    try:
+        info = run(["info", reminder_id], json_output=True)
+    except RemctlError as exc:
+        return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
+
+    title = info.get("title") or f"#{reminder_id}"
+    summary_by_action = {
+        "done": f"Mark “{title}” as complete",
+        "edit": f"Change “{title}”'s title to “{value}”",
+        "reschedule": f"Reschedule “{title}” to “{value}”",
+        "move": f"Move “{title}” to “{value}”",
     }
+    item = {
+        "title": summary_by_action.get(action, f"{action} “{title}”"),
+        "subtitle": "↩ to confirm, or backspace the query to cancel",
+        "arg": value,
+        "valid": True,
+        "variables": {"action": action, "reminder_id": reminder_id, "reminder_title": title},
+    }
+    return {"items": [item]}
+
+
+def render_text_input(reminder_id, action, typed_text, prompt_hint):
+    if typed_text and confirm_enabled():
+        item = {
+            "title": typed_text,
+            "subtitle": "↩ or Tab to review before confirming",
+            "valid": False,
+            "autocomplete": f"confirm:{action}:{reminder_id}:{typed_text}",
+        }
+    else:
+        item = {
+            "title": typed_text if typed_text else f"Type {prompt_hint}…",
+            "subtitle": f"↩ to confirm ({action})",
+            "arg": typed_text,
+            "valid": bool(typed_text),
+            "variables": {"action": action, "reminder_id": reminder_id},
+        }
     return {"items": [item]}
 
 
@@ -493,6 +608,12 @@ def main():
     menu_match = MENU_RE.match(query)
     if menu_match:
         print(json.dumps(render_menu(menu_match.group(1))))
+        return
+
+    confirm_match = CONFIRM_RE.match(query)
+    if confirm_match:
+        action, reminder_id, value = confirm_match.group(1), confirm_match.group(2), confirm_match.group(3)
+        print(json.dumps(render_confirm(action, reminder_id, value)))
         return
 
     edit_match = EDIT_RE.match(query)
@@ -514,6 +635,11 @@ def main():
             print(json.dumps(render_move_picker(reminder_id, typed)))
         except RemctlError as exc:
             print(json.dumps({"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}))
+        return
+
+    view_match = VIEW_RE.match(query)
+    if view_match:
+        print(json.dumps(render_view(view_match.group(1))))
         return
 
     print(json.dumps(render_browse(query)))
