@@ -13,7 +13,7 @@
 	<key>createdby</key>
 	<string>Thomas</string>
 	<key>version</key>
-	<string>0.1.0</string>
+	<string>0.2.0</string>
 	<key>disabled</key>
 	<false/>
 	<key>variables</key>
@@ -29,7 +29,7 @@
 			<key>type</key>
 			<string>alfred.workflow.input.scriptfilter</string>
 			<key>uid</key>
-			<string>455C2AF5-9FAA-47C0-A0C4-6271A1C5C67C</string>
+			<string>27B333B0-14A1-4F18-806C-47C01FDA6C03</string>
 			<key>version</key>
 			<integer>3</integer>
 			<key>config</key>
@@ -43,7 +43,7 @@
 				<key>runningsubtext</key>
 				<string>Searching reminders…</string>
 				<key>subtext</key>
-				<string>Type to search, #List for a list, "all", "upcoming", "flagged"</string>
+				<string>Type to search, #List for a list/smart list, "all", "upcoming", "flagged" — Right Arrow for actions</string>
 				<key>type</key>
 				<integer>0</integer>
 				<key>script</key>
@@ -56,38 +56,9 @@
 		</dict>
 		<dict>
 			<key>type</key>
-			<string>alfred.workflow.input.scriptfilter</string>
-			<key>uid</key>
-			<string>10E84386-C16E-46E2-8971-D0009B02B427</string>
-			<key>version</key>
-			<integer>3</integer>
-			<key>config</key>
-			<dict>
-				<key>keyword</key>
-				<string></string>
-				<key>withspace</key>
-				<true/>
-				<key>title</key>
-				<string>Edit / Reschedule</string>
-				<key>runningsubtext</key>
-				<string></string>
-				<key>subtext</key>
-				<string></string>
-				<key>type</key>
-				<integer>0</integer>
-				<key>script</key>
-				<string>/usr/bin/python3 scripts/prompt_for_text.py "{query}"</string>
-				<key>scriptargtype</key>
-				<integer>0</integer>
-				<key>argumenttype</key>
-				<integer>0</integer>
-			</dict>
-		</dict>
-		<dict>
-			<key>type</key>
 			<string>alfred.workflow.action.script</string>
 			<key>uid</key>
-			<string>D1A2A7B5-E3FA-4C01-8C2B-1665EDF9529A</string>
+			<string>A8B9C568-7A31-4662-9495-4F059B2F7F18</string>
 			<key>version</key>
 			<integer>2</integer>
 			<key>config</key>
@@ -108,7 +79,7 @@
 			<key>type</key>
 			<string>alfred.workflow.input.keyword</string>
 			<key>uid</key>
-			<string>9E83D1A9-8D4B-4CFA-AFB9-BB3FCF4B7761</string>
+			<string>BCE5D581-6A26-4FEB-9452-39A1214A2440</string>
 			<key>version</key>
 			<integer>1</integer>
 			<key>config</key>
@@ -118,7 +89,7 @@
 				<key>argumenttype</key>
 				<integer>0</integer>
 				<key>subtext</key>
-				<string>title #List @tag !priority due:phrase notes:text</string>
+				<string>title #List @tag !priority due-phrase notes:text</string>
 				<key>text</key>
 				<string>Add reminder</string>
 				<key>withspace</key>
@@ -129,7 +100,7 @@
 			<key>type</key>
 			<string>alfred.workflow.action.script</string>
 			<key>uid</key>
-			<string>C0495386-7BAD-42D9-A576-2029DAD463CC</string>
+			<string>7AB71301-E9E1-46E7-BFF4-60E78A6EEAC9</string>
 			<key>version</key>
 			<integer>2</integer>
 			<key>config</key>
@@ -149,102 +120,58 @@
 	</array>
 	<key>connections</key>
 	<dict>
-		<key>455C2AF5-9FAA-47C0-A0C4-6271A1C5C67C</key>
+		<key>27B333B0-14A1-4F18-806C-47C01FDA6C03</key>
 		<array>
 			<dict>
 				<key>destinationuid</key>
-				<string>D1A2A7B5-E3FA-4C01-8C2B-1665EDF9529A</string>
+				<string>A8B9C568-7A31-4662-9495-4F059B2F7F18</string>
 				<key>modifiers</key>
 				<integer>0</integer>
 				<key>modifiersubtext</key>
 				<string></string>
-				<key>vitoclose</key>
-				<true/>
-			</dict>
-			<dict>
-				<key>destinationuid</key>
-				<string>10E84386-C16E-46E2-8971-D0009B02B427</string>
-				<key>modifiers</key>
-				<integer>524288</integer>
-				<key>modifiersubtext</key>
-				<string>Edit title…</string>
-				<key>vitoclose</key>
-				<true/>
-			</dict>
-			<dict>
-				<key>destinationuid</key>
-				<string>10E84386-C16E-46E2-8971-D0009B02B427</string>
-				<key>modifiers</key>
-				<integer>262144</integer>
-				<key>modifiersubtext</key>
-				<string>Reschedule…</string>
-				<key>vitoclose</key>
-				<true/>
 			</dict>
 		</array>
-		<key>10E84386-C16E-46E2-8971-D0009B02B427</key>
+		<key>BCE5D581-6A26-4FEB-9452-39A1214A2440</key>
 		<array>
 			<dict>
 				<key>destinationuid</key>
-				<string>D1A2A7B5-E3FA-4C01-8C2B-1665EDF9529A</string>
+				<string>7AB71301-E9E1-46E7-BFF4-60E78A6EEAC9</string>
 				<key>modifiers</key>
 				<integer>0</integer>
 				<key>modifiersubtext</key>
 				<string></string>
-				<key>vitoclose</key>
-				<true/>
-			</dict>
-		</array>
-		<key>9E83D1A9-8D4B-4CFA-AFB9-BB3FCF4B7761</key>
-		<array>
-			<dict>
-				<key>destinationuid</key>
-				<string>C0495386-7BAD-42D9-A576-2029DAD463CC</string>
-				<key>modifiers</key>
-				<integer>0</integer>
-				<key>modifiersubtext</key>
-				<string></string>
-				<key>vitoclose</key>
-				<true/>
 			</dict>
 		</array>
 	</dict>
 	<key>uidata</key>
 	<dict>
-		<key>455C2AF5-9FAA-47C0-A0C4-6271A1C5C67C</key>
+		<key>27B333B0-14A1-4F18-806C-47C01FDA6C03</key>
 		<dict>
 			<key>xpos</key>
 			<real>50</real>
 			<key>ypos</key>
 			<real>50</real>
 		</dict>
-		<key>10E84386-C16E-46E2-8971-D0009B02B427</key>
+		<key>A8B9C568-7A31-4662-9495-4F059B2F7F18</key>
 		<dict>
 			<key>xpos</key>
 			<real>320</real>
 			<key>ypos</key>
-			<real>170</real>
-		</dict>
-		<key>D1A2A7B5-E3FA-4C01-8C2B-1665EDF9529A</key>
-		<dict>
-			<key>xpos</key>
-			<real>590</real>
-			<key>ypos</key>
 			<real>50</real>
 		</dict>
-		<key>9E83D1A9-8D4B-4CFA-AFB9-BB3FCF4B7761</key>
+		<key>BCE5D581-6A26-4FEB-9452-39A1214A2440</key>
 		<dict>
 			<key>xpos</key>
 			<real>50</real>
 			<key>ypos</key>
-			<real>320</real>
+			<real>220</real>
 		</dict>
-		<key>C0495386-7BAD-42D9-A576-2029DAD463CC</key>
+		<key>7AB71301-E9E1-46E7-BFF4-60E78A6EEAC9</key>
 		<dict>
 			<key>xpos</key>
 			<real>320</real>
 			<key>ypos</key>
-			<real>320</real>
+			<real>220</real>
 		</dict>
 	</dict>
 </dict>

@@ -2,23 +2,27 @@
 """Run Script backend for the `remadd` keyword.
 
 Syntax (tokens may appear in any order):
-  remadd <title words...> [#List] [@tag ...] [!priority] [due:<phrase>] [notes:<text>]
+  remadd <title words...> [#List] [@tag ...] [!priority] [<due phrase>] [notes:<text>]
 
 Examples:
-  remadd Buy milk #Groceries due:tomorrow 9am
-  remadd Ship notes #Work !high due:friday 3pm @errand
+  remadd Buy milk #Groceries tomorrow 9am
+  remadd Buy milk #Groceries tom 9am
+  remadd Ship notes #Work !high friday 3pm @errand
   remadd Pay rent due:2026-06-01 notes:autopay is off this month
 
-`due:`/`notes:` phrases run to the end of the query (or until the next
-recognized token) rather than being NLP-guessed apart from the title, since
-that's unambiguous to parse correctly. Priority accepts high/medium/low or
-h/m/l. Tags are appended as plain #hashtags in the title unless the workflow
-is later extended to pass --private (see README).
+A trailing due-date phrase is auto-detected (tomorrow/tom/mon/next
+friday/9am/2026-06-01/+3d/...) without needing a `due:` marker — see
+`looks_like_due_token()` in _remctl.py for exactly what's recognized. This
+is a heuristic: a title that happens to end in a word like "Monday" will
+get parsed as a due date. Use an explicit `due:<phrase>` prefix (still
+supported, and still runs to the end of the query) to disambiguate. `notes:`
+works the same way and is never auto-detected, since free text can't be
+told apart from a due phrase by pattern alone.
 """
 import subprocess
 import sys
 
-from _remctl import RemctlError, run
+from _remctl import RemctlError, normalize_date_phrase, run, split_implicit_due
 
 PRIORITY_MAP = {
     "h": "high", "high": "high",
@@ -33,9 +37,10 @@ def notify(title, subtitle):
 
 
 def parse(query):
-    title_words, due_words, notes_words, tags = [], [], [], []
+    plain_tokens, due_words, notes_words, tags = [], [], [], []
     list_name = priority = None
     mode = None  # None | 'due' | 'notes'
+    explicit_due = False
 
     for tok in query.split():
         low = tok.lower()
@@ -53,6 +58,7 @@ def parse(query):
             continue
         if low.startswith("due:"):
             mode = "due"
+            explicit_due = True
             rest = tok[4:]
             if rest:
                 due_words.append(rest)
@@ -68,14 +74,18 @@ def parse(query):
         elif mode == "notes":
             notes_words.append(tok)
         else:
-            title_words.append(tok)
+            plain_tokens.append(tok)
+
+    if not explicit_due and plain_tokens:
+        plain_tokens, implicit_due = split_implicit_due(plain_tokens)
+        due_words = implicit_due + due_words
 
     return {
-        "title": " ".join(title_words).strip(),
+        "title": " ".join(plain_tokens).strip(),
         "list": list_name,
         "tags": tags,
         "priority": priority,
-        "due": " ".join(due_words).strip() or None,
+        "due": normalize_date_phrase(" ".join(due_words).strip()) or None,
         "notes": " ".join(notes_words).strip() or None,
     }
 
