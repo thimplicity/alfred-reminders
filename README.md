@@ -8,7 +8,7 @@ Create, search, complete, and edit Apple Reminders from Alfred, backed by
 
 This is a hand-built scaffold: the Python scripts under `scripts/` are
 tested standalone (see "Testing the scripts directly" below) against real
-Reminders data, including full create/edit/reschedule/complete/delete
+Reminders data, including full create/edit/reschedule/complete/move-list
 cycles, and are the part to trust. `info.plist` is a best-effort,
 hand-authored Alfred workflow definition — it has **not** been
 round-tripped through the actual Alfred app, since this was built in a
@@ -104,7 +104,6 @@ not exhaustively against every filter kind Reminders supports.
 |---|---|
 | Return | Open in Reminders.app |
 | ⇧ Return | Mark complete |
-| ⌃⌥⌘ Return | Delete (no undo) |
 | ⇥ Tab | Open the action menu for that reminder |
 
 Tab, not Right Arrow — per Alfred's own docs, an item's `autocomplete`
@@ -113,22 +112,43 @@ results are, since Return already does something else on them). An
 earlier version of this README incorrectly said Right Arrow worked too;
 it doesn't for a plain Script Filter result.
 
-The action menu (Open / Complete / Edit title / Reschedule / Move to list /
-Delete) is where editing, rescheduling, and moving live, rather than on a
-modifier key — all three need you to type or pick a follow-up value, and a
-modifier+Return is a one-shot fire-and-forget action with no way to open a
-text box or picker afterward. Tab into the menu, then Tab or Return on
-"Edit title…" / "Reschedule…" / "Move to list…" drops you into a
-text-entry prompt or picker. To back out of any of these without
-finishing, just backspace the query text (it's plain editable text at that
-point, e.g. `menu:3724` or `edit:3724:`) back down to `rem` and continue
-browsing.
+The action menu, in order:
+
+1. **Mark as complete**
+2. **Reschedule…**
+3. **Change title…**
+4. **Move to another list…**
+5. **Open in Reminders.app**
+
+Reschedule, change-title, and move all need a follow-up value (a typed
+date, a typed title, or a picked list), which is why they live in the menu
+rather than on a modifier key — a modifier+Return is a one-shot
+fire-and-forget action with no way to open a text box or picker
+afterward. Tab into the menu, then Tab or Return on "Reschedule…" /
+"Change title…" / "Move to another list…" drops you into a text-entry
+prompt or picker. To back out of any of these without finishing, just
+backspace the query text (it's plain editable text at that point, e.g.
+`menu:3724` or `edit:3724:`) back down to `rem` and continue browsing.
+
+There's no delete anywhere in this workflow — use Reminders.app directly
+for that.
 
 Reschedule accepts `tomorrow`, `tom`, `next friday`, `2026-06-01`, `clear`,
 etc. — same trailing-phrase parsing as `remadd`'s due-date detection below.
-"Move to list…" is a live-filtered picker over real lists only (not smart
-lists, since those are filtered views, not containers) — picking one
-completes the move immediately, no further typing needed.
+
+**Change title…** prefills the current title (so appending `#tag` or
+making a small edit doesn't mean retyping the whole thing) and supports
+adding real synced tags: any `#tag` word anywhere in what you type is
+pulled out and added via `remctl edit --private -t`, rather than left as
+literal `#tag` characters in the title — plain `--title` never
+auto-converts hashtag-looking text into a tag (verified directly against
+a real reminder: `tags` stayed `null` after creating one with `#word` in
+the title). Reschedule and move don't prefill, since a stale due date or
+list name isn't a useful starting point for either.
+
+**Move to another list…** is a live-filtered picker over real lists only
+(not smart lists, since those are filtered views, not containers) —
+picking one completes the move immediately, no further typing needed.
 
 **Known limitation**: moving a reminder between lists calls `remctl edit
 ID -l LIST`, which is documented to fall back to a verified clone-delete
@@ -189,12 +209,12 @@ A macOS notification confirms success or reports the failure.
 
 Two objects per keyword, one plain connection each — no modifier-gated
 routing anywhere. `list_reminders.py` handles browse, the Tab-triggered
-action menu, *and* the edit/reschedule text-entry prompts all in one
-script, branching on a prefix in the query string itself (`menu:<id>`,
-`edit:<id>:<text>`, `due:<id>:<text>` — see the module docstring). Only the
-terminal actions (open/complete/edit/reschedule/delete) reach
-`reminder_action.py`, which is the only script that actually calls
-`remctl` to mutate anything.
+action menu, *and* the edit/reschedule/move text-entry prompts and picker
+all in one script, branching on a prefix in the query string itself
+(`menu:<id>`, `edit:<id>:<text>`, `due:<id>:<text>`,
+`movelist:<id>:<text>` — see the module docstring). Only the terminal
+actions (open/complete/edit/reschedule/move) reach `reminder_action.py`,
+which is the only script that actually calls `remctl` to mutate anything.
 
 ## If something's not wired right
 

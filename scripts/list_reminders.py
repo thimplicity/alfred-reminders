@@ -359,10 +359,6 @@ def build_browse_item(item):
                 "subtitle": f"Complete “{title}”",
                 "variables": dict(base_vars, action="done"),
             },
-            "cmd+alt+ctrl": {
-                "subtitle": f"Delete “{title}” — cannot be undone",
-                "variables": dict(base_vars, action="delete"),
-            },
         },
     }
 
@@ -406,12 +402,11 @@ def render_browse(query):
 
 
 MENU_ACTIONS = [
-    ("Open in Reminders.app", "open", None, None),
-    ("Complete", "done", None, None),
-    ("Edit title…", None, "edit", "type a new title"),
-    ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am"),
-    ("Move to list…", None, "movelist", "type or pick a list"),
-    ("Delete — cannot be undone", "delete", None, None),
+    ("Mark as complete", "done", None, None, False),
+    ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am", False),
+    ("Change title…", None, "edit", "type a new title, or add #tag to tag it", True),
+    ("Move to another list…", None, "movelist", "type or pick a list", False),
+    ("Open in Reminders.app", "open", None, None, False),
 ]
 
 
@@ -423,7 +418,7 @@ def render_menu(reminder_id):
 
     title = info.get("title") or f"#{reminder_id}"
     items = []
-    for label, action, drill_prefix, hint in MENU_ACTIONS:
+    for label, action, drill_prefix, hint, prefill_title in MENU_ACTIONS:
         if action:
             items.append({
                 "title": label,
@@ -437,11 +432,16 @@ def render_menu(reminder_id):
                 },
             })
         else:
+            # Change-title prefills the current title so adding a #tag (or
+            # a small tweak) doesn't require retyping the whole thing —
+            # reschedule/move don't prefill, since a stale due date or list
+            # name isn't a useful starting point for either.
+            prefill = title if prefill_title else ""
             items.append({
                 "title": label,
                 "subtitle": f"“{title}” — {hint}",
                 "valid": False,
-                "autocomplete": f"{drill_prefix}:{reminder_id}:",
+                "autocomplete": f"{drill_prefix}:{reminder_id}:{prefill}",
             })
     return {"items": items}
 
