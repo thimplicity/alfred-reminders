@@ -89,6 +89,23 @@ LIST_ICON = reminders_app_icon()
 def _icon_kwargs():
     return {"icon": LIST_ICON} if LIST_ICON else {}
 
+
+def _back_item(reminder_id, label="← Back to actions"):
+    """A one-keypress way out of a drill-down screen (view/edit/due/
+    movelist) back to the action menu, instead of manually backspacing the
+    query text. Backspacing still works and is still how you get all the
+    way back out to browse — there's no equivalent "back to search" item
+    on the menu itself, since the original browse scope (e.g. @Groceries)
+    isn't threaded through menu:<id> and can't be reconstructed here,
+    whereas the query text itself still has it.
+    """
+    return {
+        "title": label,
+        "subtitle": "Tab to return to the action menu",
+        "valid": False,
+        "autocomplete": f"menu:{reminder_id}",
+    }
+
 MENU_RE = re.compile(r"^menu:(\d+)$")
 EDIT_RE = re.compile(r"^edit:(\d+):(.*)$", re.DOTALL)
 DUE_RE = re.compile(r"^due:(\d+):(.*)$", re.DOTALL)
@@ -517,7 +534,8 @@ def render_view(reminder_id):
         ("Tags", ", ".join(info.get("tags") or []) or "none"),
         ("Notes", info.get("notes") or "none"),
     ]
-    return {"items": [
+    items = [_back_item(reminder_id)]
+    items += [
         {
             "title": f"{label}: {value}",
             "subtitle": "↩ to open in Reminders.app",
@@ -526,7 +544,8 @@ def render_view(reminder_id):
             "variables": dict(base_vars),
         }
         for label, value in lines
-    ]}
+    ]
+    return {"items": items}
 
 
 def render_move_picker(reminder_id, partial):
@@ -543,13 +562,13 @@ def render_move_picker(reminder_id, partial):
         if kind == "List" and needle in name.lower()
     )
     if not matches:
-        return {"items": [{
+        return {"items": [_back_item(reminder_id), {
             "title": f'No list matches "{partial}"' if partial else "No lists found",
             "subtitle": "Keep typing, or check the name in Reminders.app",
             "valid": False,
         }]}
     if confirm_enabled():
-        return {"items": [
+        return {"items": [_back_item(reminder_id)] + [
             {
                 "title": name,
                 "subtitle": "Tab to review before confirming",
@@ -559,7 +578,7 @@ def render_move_picker(reminder_id, partial):
             }
             for name in matches
         ]}
-    return {"items": [
+    return {"items": [_back_item(reminder_id)] + [
         {
             "title": name,
             "subtitle": "Move here",
@@ -611,7 +630,7 @@ def render_text_input(reminder_id, action, typed_text, prompt_hint):
             "valid": bool(typed_text),
             "variables": {"action": action, "reminder_id": reminder_id},
         }
-    return {"items": [item]}
+    return {"items": [_back_item(reminder_id), item]}
 
 
 def main():
