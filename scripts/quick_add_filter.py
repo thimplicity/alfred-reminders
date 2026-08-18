@@ -28,10 +28,17 @@ Keyword Input.
 import json
 import sys
 
-from _remctl import RemctlError, fetch_known_tags, fetch_list_and_smart_list_names
+from _remctl import RemctlError, fetch_known_tags, fetch_list_and_smart_list_names, reminders_app_icon
 from quick_add import parse
 
 PRIORITY_CHOICES = ["high", "medium", "low"]
+# See list_reminders.py's LIST_ICON for why: a free, always-available
+# "this is a list" glyph for list-representing rows, computed once.
+LIST_ICON = reminders_app_icon()
+
+
+def _icon_kwargs():
+    return {"icon": LIST_ICON} if LIST_ICON else {}
 
 
 def replace_last_token(query, new_token):
@@ -101,6 +108,7 @@ def render_list_completion(query, partial):
             "subtitle": "Tab to pick this list and keep typing",
             "valid": False,
             "autocomplete": replace_last_token(query, f"@{name}"),
+            **_icon_kwargs(),
         }
         for name in matches
     ]}

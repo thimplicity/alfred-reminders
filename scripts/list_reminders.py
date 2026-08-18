@@ -74,10 +74,20 @@ from _remctl import (
     items_from,
     matches_smart_list,
     normalize_date_phrase,
+    reminders_app_icon,
     run,
 )
 
 CACHE_TTL = 5  # seconds; only applies to scope-level fetches, not free text
+# Computed once at import time rather than per-render — Reminders.app's
+# location doesn't change mid-process. See reminders_app_icon()'s
+# docstring for why every list-representing row (not reminder rows) uses
+# this: it's a free, always-available "this is a list" glyph.
+LIST_ICON = reminders_app_icon()
+
+
+def _icon_kwargs():
+    return {"icon": LIST_ICON} if LIST_ICON else {}
 
 MENU_RE = re.compile(r"^menu:(\d+)$")
 EDIT_RE = re.compile(r"^edit:(\d+):(.*)$", re.DOTALL)
@@ -171,7 +181,7 @@ def render_list_picker(partial):
             "valid": False,
         }]}
     return {"items": [
-        {"title": name, "subtitle": kind, "valid": False, "autocomplete": f"@{name}"}
+        {"title": name, "subtitle": kind, "valid": False, "autocomplete": f"@{name}", **_icon_kwargs()}
         for name, kind in matches
     ]}
 
@@ -545,6 +555,7 @@ def render_move_picker(reminder_id, partial):
                 "subtitle": "Tab to review before confirming",
                 "valid": False,
                 "autocomplete": f"confirm:move:{reminder_id}:{name}",
+                **_icon_kwargs(),
             }
             for name in matches
         ]}
@@ -555,6 +566,7 @@ def render_move_picker(reminder_id, partial):
             "arg": name,
             "valid": True,
             "variables": {"action": "move", "reminder_id": reminder_id},
+            **_icon_kwargs(),
         }
         for name in matches
     ]}

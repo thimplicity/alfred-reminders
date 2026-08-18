@@ -115,7 +115,11 @@ erroring on partial text — shows every list/smart-list or tag whose name
 contains what you've typed so far (`@` with nothing after it lists
 everything). These are `valid: false` `autocomplete` items, so Tab (not
 Return) fills in the exact name and immediately shows that scope — no
-separate confirm step needed.
+separate confirm step needed. Every row representing a list (this picker,
+"Move to another list…", and `remadd`'s `@` completion) shows
+Reminders.app's own icon (`reminders_app_icon()` in `scripts/_remctl.py`)
+so list rows read as "this is a list" at a glance — other row kinds
+(reminders, tags, actions) still use Alfred's default icon for now.
 
 **Smart lists**: `remctl` can inspect a smart list's filter definition but
 has no command to fetch its live contents, so `@Name` tries a real list

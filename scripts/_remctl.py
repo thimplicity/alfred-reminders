@@ -28,6 +28,29 @@ def find_remctl():
     return None
 
 
+# macOS moved most built-in apps to /System/Applications/ starting with
+# Big Sur — Reminders.app lives there now, but check the pre-Big-Sur
+# /Applications/ location too in case this ever runs somewhere older.
+REMINDERS_APP_PATHS = [
+    "/System/Applications/Reminders.app",
+    "/Applications/Reminders.app",
+]
+
+
+def reminders_app_icon():
+    """Alfred `icon` dict pointing at Reminders.app itself — used for any
+    Script Filter result that represents *a list* (not a reminder), so
+    list-picking rows read as "this is a list" at a glance without needing
+    a bundled icon asset. `fileicon` tells Alfred to render the same icon
+    Finder would show for that path. Returns None (no icon override,
+    Alfred's default) if Reminders.app isn't at either known location.
+    """
+    for path in REMINDERS_APP_PATHS:
+        if os.path.isdir(path):
+            return {"type": "fileicon", "path": path}
+    return None
+
+
 class RemctlError(RuntimeError):
     def __init__(self, message, stderr=""):
         super().__init__(message)
