@@ -177,9 +177,19 @@ key. Tab into the menu, then Tab again on "Reschedule…" / "Change
 title…" / "Move to another list…" / "View details" drops you into a
 text-entry prompt, picker, or read-only detail screen — these are
 `valid: false` items, so only Tab reliably applies their `autocomplete`.
-To back out of any of these without finishing, just backspace the query
-text (it's plain editable text at that point, e.g. `menu:3724` or
-`edit:3724:`) back down to `rem` and continue browsing.
+Each of those screens (View details, Reschedule, Change title, Move to
+another list) also includes a **"← Back to actions"** row — Tab it to
+jump straight back to that reminder's action menu instead of retyping or
+backspacing, e.g. View details then straight into Reschedule without
+leaving the reminder. It's placed *after* the working result (the typed
+value, or the list matches), not before — Alfred selects the first
+returned item by default, so a leading Back row would otherwise hijack a
+type-then-Return/Tab submission and silently discard whatever was just
+typed instead of confirming it. There's no equivalent "back to search" row on the
+menu screen itself — the original browse scope (`@Groceries`, a search
+term, ...) isn't preserved once you're in `menu:<id>`, so getting back
+out to browsing still means backspacing the query text (it's plain
+editable text at that point, e.g. `menu:3724`) back down to `rem`.
 
 **View details** shows title, list, due date, priority, flag, tags, and
 notes as a read-only screen (Return on any line just opens the reminder

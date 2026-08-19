@@ -497,14 +497,27 @@ def _matches_date(item, date_spec):
             magnitude = float(magnitude)
         except (ValueError, TypeError):
             return True
-        now = dt.datetime.now()
+        # "inNext 1 day" reads as *calendar* days ("today and tomorrow"),
+        # not a rolling 24-hour window from the current clock time —
+        # verified directly against a real "Important" smart list (filter:
+        # priority set + inNext 1 day/includePastDue) whose actual contents
+        # in Reminders.app included items due tomorrow morning, which a
+        # `now + 24h` window would have cut off whenever "now" was past
+        # that same time today. So the horizon is the end of the day that
+        # is `magnitude` calendar days out, and (when includePastDue is
+        # unset) the lower bound is the start of *today* rather than the
+        # exact current moment, so an already-passed reminder due earlier
+        # today still counts as "today."
+        today = dt.date.today()
         unit_days = {"day": 1, "week": 7, "month": 30}.get(units, 1)
-        horizon = now + dt.timedelta(days=unit_days * magnitude)
+        horizon_date = today + dt.timedelta(days=round(unit_days * magnitude))
+        horizon = dt.datetime.combine(horizon_date, dt.time(23, 59, 59))
         if direction != "inNext":
             return True  # unrecognized direction shape; don't exclude
         if include_past_due:
             return due <= horizon
-        return now <= due <= horizon
+        start_of_today = dt.datetime.combine(today, dt.time.min)
+        return start_of_today <= due <= horizon
     return True
 
 
