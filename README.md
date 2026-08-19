@@ -203,15 +203,22 @@ The action menu, in order:
 2. **Reschedule…**
 3. **Change title…**
 4. **Move to another list…**
-5. **View details**
-6. **Open in Reminders.app**
+5. **Set priority…**
+6. **Flag** / **Unflag** — label and target action switch based on the
+   reminder's current flagged state, computed fresh each time the menu
+   renders (not a static label)
+7. **View details**
+8. **Open in Reminders.app**
 
-Reschedule, change-title, move, and view-details all need a follow-up
-value or more screen space than a modifier+Return can give (a modifier is
-a one-shot fire-and-forget action, not an interactive prompt or a second
-screen), which is why they live in the menu rather than on a modifier
-key. Tab into the menu, then Tab again on "Reschedule…" / "Change
-title…" / "Move to another list…" / "View details" drops you into a
+Reschedule, change-title, move, set-priority, and view-details all need a
+follow-up value or more screen space than a modifier+Return can give (a
+modifier is a one-shot fire-and-forget action, not an interactive prompt
+or a second screen), which is why they live in the menu rather than on a
+modifier key. Flag/Unflag doesn't need a follow-up value — it's a
+same-shape one-shot action as Mark as complete (drills into confirm
+first when `CONFIRM_CHANGES` is on, fires directly otherwise). Tab into
+the menu, then Tab again on "Reschedule…" / "Change title…" / "Move to
+another list…" / "Set priority…" / "View details" drops you into a
 text-entry prompt, picker, or read-only detail screen — these are
 `valid: false` items, so only Tab reliably applies their `autocomplete`.
 Each of those screens (View details, Reschedule, Change title, Move to
@@ -236,17 +243,37 @@ works too, same as before.
 **View details** shows title, list, due date, priority, flag, tags, and
 notes as a read-only screen (Return on any line just opens the reminder
 in Reminders.app, same as browsing normally) — the one place in the menu
-that doesn't mutate anything.
+that doesn't mutate anything. Each line has its own icon too, matching
+the equivalent action's icon where one exists (Priority's icon is the
+same as "Set priority…"'s, Flagged's the same as "Flag"/"Unflag"'s, List
+the same Reminders.app icon used everywhere lists show up, Due the same
+Calendar icon as "Reschedule…") — see `VIEW_ICONS` in
+`scripts/list_reminders.py`.
+
+**Set priority…** is a fixed 4-choice picker (None, Low, Medium, High)
+rather than free text — priority only has these values, so there's
+nothing to gain from typing one out over picking it, and it rules out
+typos remctl would just reject.
+
+**Flag** / **Unflag** toggles the reminder's real flagged state via
+`remctl edit --private --flagged`/`--no-flagged` (EventKit's
+private-metadata path) — not the standalone `remctl flag`/`unflag`
+commands, which are AppleScript-driven and, verified directly, only
+respond reliably when Reminders.app is the *frontmost* application
+(they time out entirely when it's merely running in the background).
+The `edit --private` path has no such dependency and completes in
+~0.2s regardless of what's frontmost.
 
 There's no delete anywhere in this workflow — use Reminders.app directly
 for that.
 
 **Confirmation step**: every mutation (Mark as complete, Reschedule,
-Change title, Move to another list) shows a one-line summary — "Mark
-'Buy milk' as complete", "Move 'Buy milk' to 'Groceries'" — that needs one
-more Return before it actually calls `remctl`. This is on by default; set
-the `CONFIRM_CHANGES` workflow variable to `0` (Alfred's workflow
-configuration sheet, or edit `info.plist`'s top-level `variables` dict) to
+Change title, Move to another list, Set priority, Flag/Unflag) shows a
+one-line summary — "Mark 'Buy milk' as complete", "Move 'Buy milk' to
+'Groceries'" — that needs one more Return before it actually calls
+`remctl`. This is on by default; set the `CONFIRM_CHANGES` workflow
+variable to `0` (Alfred's workflow configuration sheet, or edit
+`info.plist`'s top-level `variables` dict) to
 skip straight to executing instead. Open/View details are never confirmed
 — they don't change anything.
 
@@ -275,11 +302,14 @@ ID -l LIST`, which is documented to fall back to a verified clone-delete
 when EventKit rejects a plain move across a list/container boundary. On
 at least one test machine this instead surfaces a raw
 `com.apple.reminderkit error -3002` — reproduced identically calling
-`remctl` directly (with and without `--private`), so it's a remctl/EventKit
-behavior on that Mac, not a bug in this workflow's scripts. If you hit this,
-it's worth checking whether it's specific to certain lists (e.g. Groceries)
-or all moves on your machine, and reporting to the remctl project if it's
-the latter.
+`remctl` directly (with and without `--private`, and with `--list-id`
+instead of `-l`), so it's a remctl/EventKit behavior on that Mac, not a
+bug in this workflow's scripts. Re-verified current as of remctl 1.7.1
+(the latest release at the time) with `remctl doctor` reporting a clean
+setup, and no matching issue open on the remctl repo. If you hit this,
+it's worth checking whether it's specific to certain lists (e.g.
+Groceries) or all moves on your machine, and reporting to the remctl
+project if it's the latter.
 
 ### `remadd` — quick add
 
@@ -436,10 +466,14 @@ python3 list_reminders.py "menu:23880:%40Work"              # action menu, "back
 python3 list_reminders.py "edit:23880:%40Work:New title"    # edit text-entry preview
 python3 list_reminders.py "due:23880:%40Work:tom 9am"       # reschedule text-entry preview (shows current due date too)
 python3 list_reminders.py "movelist:23880:%40Work:Gro"      # move-to-list picker preview
-python3 list_reminders.py "view:23880:%40Work"               # read-only detail screen
+python3 list_reminders.py "priority:23880:%40Work:hi"        # priority picker preview (filters to High)
+python3 list_reminders.py "view:23880:%40Work"               # read-only detail screen, one icon per line
 python3 list_reminders.py "confirm:done:23880:"                    # confirm-step preview
 CONFIRM_CHANGES=0 python3 list_reminders.py "edit:23880:%40Work:New title"   # with confirm disabled
 action=done reminder_id=23880 python3 reminder_action.py
+action=flag reminder_id=23880 python3 reminder_action.py     # via edit --private --flagged, not remctl flag
+action=unflag reminder_id=23880 python3 reminder_action.py
+action=priority reminder_id=23880 python3 reminder_action.py "high"
 python3 list_reminders.py "overdue today"              # bulk-reschedule confirm preview (read-only)
 action=bulk_reschedule_overdue target=today python3 reminder_action.py   # actually reschedules every overdue reminder — careful
 python3 quick_add.py "Buy milk @Groceries tomorrow 9am"
@@ -469,26 +503,35 @@ python3 quick_add_filter.py "Buy milk !h"                      # priority comple
   supports more filter kinds over time; unrecognized filter keys are
   currently ignored (treated as "always matches"), which can make a smart
   list look broader in Alfred than it does in Reminders.app.
-- **Regenerating `icons/mark_complete.png`** (or adding a new bundled
-  icon in the same style): rendered from Apple's own SF Symbols via
+- **Regenerating a bundled `icons/*.png`** (or adding a new one in the
+  same style): all six — `mark_complete`, `title`, `priority`, `flag`,
+  `tags`, `notes` — are rendered from Apple's own SF Symbols via
   `osascript -l JavaScript`, no image-editing app or third-party app icon
-  involved — swap the symbol name, point size, or `NSColor` values below
-  to change it:
+  involved:
   ```bash
   osascript -l JavaScript -e '
   ObjC.import("AppKit");
-  var green = $.NSColor.colorWithRedGreenBlueAlpha(0.20, 0.78, 0.35, 1.0);
-  var config = $.NSImageSymbolConfiguration.configurationWithPointSizeWeight(220, $.NSFontWeightRegular);
-  var colorConfig = $.NSImageSymbolConfiguration.configurationWithHierarchicalColor(green);
-  config = config.configurationByApplyingConfiguration(colorConfig);
-  var img = $.NSImage.imageWithSystemSymbolNameAccessibilityDescription("checkmark.circle.fill", $());
-  img = img.imageWithSymbolConfiguration(config);
-  img.setSize($.NSMakeSize(256, 256));
-  var rep = $.NSBitmapImageRep.imageRepWithData(img.TIFFRepresentation);
-  var pngData = rep.representationUsingTypeProperties(4, $());
-  pngData.writeToFileAtomically("icons/mark_complete.png", true);
+  function makeIcon(symbolName, filename, r, g, b) {
+      var color = $.NSColor.colorWithRedGreenBlueAlpha(r, g, b, 1.0);
+      var config = $.NSImageSymbolConfiguration.configurationWithPointSizeWeight(220, $.NSFontWeightRegular);
+      var colorConfig = $.NSImageSymbolConfiguration.configurationWithHierarchicalColor(color);
+      config = config.configurationByApplyingConfiguration(colorConfig);
+      var img = $.NSImage.imageWithSystemSymbolNameAccessibilityDescription(symbolName, $());
+      img = img.imageWithSymbolConfiguration(config);
+      img.setSize($.NSMakeSize(256, 256));
+      var rep = $.NSBitmapImageRep.imageRepWithData(img.TIFFRepresentation);
+      var pngData = rep.representationUsingTypeProperties(4, $());
+      pngData.writeToFileAtomically(filename, true);
+  }
+  makeIcon("checkmark.circle.fill", "icons/mark_complete.png", 0.20, 0.78, 0.35);
+  makeIcon("textformat", "icons/title.png", 0.45, 0.47, 0.52);
+  makeIcon("exclamationmark.circle.fill", "icons/priority.png", 0.95, 0.35, 0.25);
+  makeIcon("flag.fill", "icons/flag.png", 1.0, 0.58, 0.0);
+  makeIcon("tag.fill", "icons/tags.png", 0.6, 0.35, 0.95);
+  makeIcon("note.text", "icons/notes.png", 0.35, 0.55, 0.95);
   '
   ```
-  (`representationUsingTypeProperties`'s first argument is an
-  `NSBitmapImageFileType` raw value — `4` is PNG; `1`, easy to reach for
-  by mistake, is BMP.)
+  Swap the symbol name, point size, or `r, g, b` values to change any
+  one of them individually. (`representationUsingTypeProperties`'s first
+  argument is an `NSBitmapImageFileType` raw value — `4` is PNG; `1`,
+  easy to reach for by mistake, is BMP.)
