@@ -3,9 +3,9 @@
 
 Reads `action` and `reminder_id` from the environment (set as Alfred
 workflow variables by the triggering item/mod) and `{query}` as argv[1],
-which is only meaningful for edit/reschedule/move (the text typed, or the
-list name picked, in list_reminders.py's menu/text-entry/picker modes).
-Clears the scope-fetch cache after any mutation so the next `rem`
+which is only meaningful for edit/reschedule/priority (the text typed, or
+the priority picked, in list_reminders.py's menu/text-entry/picker
+modes). Clears the scope-fetch cache after any mutation so the next `rem`
 keystroke reflects the change immediately.
 """
 import datetime as dt
@@ -148,11 +148,6 @@ def main():
                 print("No date entered — reschedule cancelled.", file=sys.stderr)
                 sys.exit(1)
             run(["edit", reminder_id, "-d", normalize_date_phrase(typed_text)], json_output=False)
-        elif action == "move":
-            if not typed_text:
-                print("No list chosen — move cancelled.", file=sys.stderr)
-                sys.exit(1)
-            run(["edit", reminder_id, "-l", typed_text], json_output=False)
         elif action == "flag":
             # `remctl flag <id>` (AppleScript UI automation) needs
             # Reminders.app frontmost to respond at all — verified
