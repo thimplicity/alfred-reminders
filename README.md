@@ -95,6 +95,28 @@ structure" below; the scripts themselves don't change.
 | `rem upcoming [N]` | Due within N days (default 7) |
 | `rem flagged` | Flagged reminders |
 | `rem overdue` | Overdue only |
+| `rem overdue today` / `rem overdue tomorrow` | **Bulk reschedule** every overdue reminder to today/tomorrow in one shot |
+
+**Bulk rescheduling overdue reminders**: `rem overdue today` (or
+`tomorrow`) doesn't browse — it's a single confirm-style row, "Reschedule
+all N overdue reminders to today," and one more Return actually does it.
+This always shows that confirm step, even with `CONFIRM_CHANGES=0` —
+touching every overdue reminder at once is higher-stakes than a normal
+single-item edit, so it isn't worth letting that variable skip review
+here. The set of reminders to reschedule is fetched fresh at the moment
+you confirm (not whatever was overdue when the screen first rendered), a
+macOS notification reports how many succeeded (and any failures, up to
+3 named), and one reminder failing doesn't stop the rest from being
+rescheduled. Only the *day* moves — a reminder due at 9am stays due at
+9am, just on today/tomorrow instead of whenever it was overdue from (an
+all-day reminder stays all-day); passing a bare "today"/"tomorrow" to
+remctl would otherwise silently strip any existing time, so each
+reminder's original time of day is read off its own `dueDate` and
+reattached before rescheduling (`_due_for_bulk_reschedule()` in
+`scripts/reminder_action.py`). There's no way to hand-pick a subset —
+Alfred's results list has no multi-select, so it's genuinely
+all-or-nothing per invocation; use the normal per-reminder Reschedule…
+menu action for anything selective.
 
 **Changing what `rem` alone shows**: by default an empty query is "due
 today + overdue," which is legitimately empty whenever nothing's due or
@@ -118,8 +140,19 @@ Return) fills in the exact name and immediately shows that scope — no
 separate confirm step needed. Every row representing a list (this picker,
 "Move to another list…", and `remadd`'s `@` completion) shows
 Reminders.app's own icon (`reminders_app_icon()` in `scripts/_remctl.py`)
-so list rows read as "this is a list" at a glance — other row kinds
-(reminders, tags, actions) still use Alfred's default icon for now.
+so list rows read as "this is a list" at a glance. The action menu's own
+six rows are each visually distinct too (`MENU_ICONS` in
+`scripts/list_reminders.py`), borrowing icons from other installed apps
+rather than bundling custom assets — no icon-drawing tools involved, just
+`{"type": "fileicon", "path": "..."}` pointing at whatever app already
+has a matching Finder icon: Todoist for Mark as complete (fitting, since
+this workflow is itself modeled on Todoist's own Alfred workflow),
+Calendar for Reschedule, TextEdit for Change title, a generic macOS
+folder icon for Move to another list, System Information for View
+details, and Reminders.app itself for Open in Reminders.app. Each entry
+degrades to Alfred's default icon if the app it points at isn't
+installed (Todoist specifically, being third-party) — see `app_icon()`
+in `scripts/_remctl.py`.
 
 **Smart lists**: `remctl` can inspect a smart list's filter definition but
 has no command to fetch its live contents, so `@Name` tries a real list
@@ -181,15 +214,20 @@ Each of those screens (View details, Reschedule, Change title, Move to
 another list) also includes a **"← Back to actions"** row — Tab it to
 jump straight back to that reminder's action menu instead of retyping or
 backspacing, e.g. View details then straight into Reschedule without
-leaving the reminder. It's placed *after* the working result (the typed
-value, or the list matches), not before — Alfred selects the first
-returned item by default, so a leading Back row would otherwise hijack a
-type-then-Return/Tab submission and silently discard whatever was just
-typed instead of confirming it. There's no equivalent "back to search" row on the
-menu screen itself — the original browse scope (`@Groceries`, a search
-term, ...) isn't preserved once you're in `menu:<id>`, so getting back
-out to browsing still means backspacing the query text (it's plain
-editable text at that point, e.g. `menu:3724`) back down to `rem`.
+leaving the reminder. The action menu itself also has a **"← Back to
+results"** row, which re-renders the exact scope/search you drilled in
+from (`@Groceries`, a search term, plain `rem`, ...) rather than
+resetting to bare `rem` — the original browse query rides along
+(percent-encoded) through every mode string from `menu:<id>:<ret>` on
+down, so going View details → back to actions → back to results still
+lands you exactly where you started, not just "the menu" or "today."
+Both Back rows are placed *after* the working result (the typed value,
+the list matches, or the menu's own actions), not before — Alfred
+selects the first returned item by default, so a leading Back row would
+otherwise hijack a type-then-Return/Tab submission and silently discard
+whatever was just typed instead of confirming it, or hijack a quick
+Return meant for the menu's top action. Backspacing the query text still
+works too, same as before.
 
 **View details** shows title, list, due date, priority, flag, tags, and
 notes as a read-only screen (Return on any line just opens the reminder
@@ -209,7 +247,10 @@ skip straight to executing instead. Open/View details are never confirmed
 — they don't change anything.
 
 Reschedule accepts `tomorrow`, `tom`, `next friday`, `2026-06-01`, `clear`,
-etc. — same trailing-phrase parsing as `remadd`'s due-date detection below.
+etc. — same trailing-phrase parsing as `remadd`'s due-date detection below
+— and shows the reminder's *current* due date the whole time you're
+typing (e.g. "↩ to confirm (reschedule) — currently Tomorrow 12:00 PM"),
+so retyping isn't a guessing game about what you're changing from.
 
 **Change title…** prefills the current title (so appending `#tag` or
 making a small edit doesn't mean retyping the whole thing) and supports
@@ -253,16 +294,18 @@ remadd <title words...> [@List] [#tag ...] [!priority] [<due phrase>] [notes:<te
   appended to the title (remctl limitation, not a synced tag) — see
   "Extending" below if you want real synced tags
 - `!priority` — `!high` / `!medium` / `!low` (or `!h`/`!m`/`!l`)
-- A trailing due-date phrase is **auto-detected** — no `due:` marker
-  needed: `tomorrow`, `tom`, `next friday`, `9am`, `2026-06-01`, `+3d`,
+- A trailing due-date phrase is **auto-detected** — no marker needed at
+  all: `tomorrow`, `tom`, `next friday`, `9am`, `2026-06-01`, `+3d`,
   `9/13`, `9/13 9am`, `9/9/26`, `sep 9`, `9 sep`, and glued forms typed
   with no space (`tom9am`, `friday3:30pm`, `sep9`), etc. This is a
   heuristic (see `looks_like_due_token()` in `scripts/_remctl.py`) and
   conservative about bare numbers specifically to avoid misreading an
   ordinary trailing number in a title (`Buy 5 apples` stays a title). If a
   title genuinely ends in a date-like word and gets misparsed, use an
-  explicit `due:<phrase>` prefix to disambiguate — it still works and
-  always wins over the heuristic. Slash dates (`9/13`) are month-first
+  explicit `/<phrase>` prefix to disambiguate — `remadd Pay rent /2026-06-01`
+  — it still works and always wins over the heuristic; the longer
+  `due:<phrase>` form still works too, `/` is just the shorter way to
+  write it. Slash dates (`9/13`) are month-first
   (US style); a bare `M/D` or `sep 9` with no year is read as the next
   occurrence of that date (this year if it hasn't passed yet, otherwise
   next year), and a 2-digit year (`9/9/26`) is read as 20XX. remctl's own
@@ -292,7 +335,7 @@ to use a suggestion, typing a brand-new tag or a due phrase by hand works
 exactly as before.
 
 The preview's subtitle always shows all five slots — `@list`, `#tag`,
-`!priority`, `due`, `notes:` — as a standing reminder of the syntax, not
+`!priority`, `/due`, `notes:` — as a standing reminder of the syntax, not
 just the ones you've already filled in; a slot switches from its
 placeholder to the real value as soon as it's set (e.g. `@list` becomes
 `@Groceries`).
@@ -303,7 +346,7 @@ Examples:
 remadd Buy milk @Groceries tomorrow 9am
 remadd Buy milk @Groceries tom 9am
 remadd Ship notes @Work !high friday 3pm #errand
-remadd Pay rent due:2026-06-01 notes:autopay is off this month
+remadd Pay rent /2026-06-01 notes:autopay is off this month
 ```
 
 A macOS notification confirms success or reports the failure.
@@ -324,9 +367,10 @@ Two objects per keyword, one plain connection each — no modifier-gated
 routing anywhere. `list_reminders.py` handles browse, the Tab/Return
 action menu, the edit/reschedule/move text-entry prompts and picker, the
 read-only details screen, *and* the confirm-step summary all in one
-script, branching on a prefix in the query string itself (`menu:<id>`,
-`edit:<id>:<text>`, `due:<id>:<text>`, `movelist:<id>:<text>`, `view:<id>`,
-`confirm:<action>:<id>:<value>` — see the module docstring).
+script, branching on a prefix in the query string itself (`menu:<id>:<ret>`,
+`edit:<id>:<ret>:<text>`, `due:<id>:<ret>:<text>`, `movelist:<id>:<ret>:<text>`,
+`view:<id>:<ret>`, `confirm:<action>:<id>:<value>` — see the module
+docstring for what `<ret>` is).
 `quick_add_filter.py` similarly handles both the `@`/`#`/`!` live
 completion and the running preview, but never calls `remctl` itself — its
 one valid output item's `arg` is the full query text, unchanged, which is
@@ -384,14 +428,16 @@ python3 list_reminders.py "@Wo"                        # list/smart-list picker
 python3 list_reminders.py "#urgent"                     # tag filter, across all lists
 python3 list_reminders.py "#ur"                          # tag picker
 python3 list_reminders.py "milk"                          # search
-python3 list_reminders.py "menu:23880"                     # action menu for one reminder
-python3 list_reminders.py "edit:23880:New title"            # edit text-entry preview
-python3 list_reminders.py "due:23880:tom 9am"                # reschedule text-entry preview
-python3 list_reminders.py "movelist:23880:Gro"                 # move-to-list picker preview
-python3 list_reminders.py "view:23880"                           # read-only detail screen
+python3 list_reminders.py "menu:23880:%40Work"              # action menu, "back to results" -> @Work
+python3 list_reminders.py "edit:23880:%40Work:New title"    # edit text-entry preview
+python3 list_reminders.py "due:23880:%40Work:tom 9am"       # reschedule text-entry preview (shows current due date too)
+python3 list_reminders.py "movelist:23880:%40Work:Gro"      # move-to-list picker preview
+python3 list_reminders.py "view:23880:%40Work"               # read-only detail screen
 python3 list_reminders.py "confirm:done:23880:"                    # confirm-step preview
-CONFIRM_CHANGES=0 python3 list_reminders.py "edit:23880:New title"   # with confirm disabled
+CONFIRM_CHANGES=0 python3 list_reminders.py "edit:23880:%40Work:New title"   # with confirm disabled
 action=done reminder_id=23880 python3 reminder_action.py
+python3 list_reminders.py "overdue today"              # bulk-reschedule confirm preview (read-only)
+action=bulk_reschedule_overdue target=today python3 reminder_action.py   # actually reschedules every overdue reminder — careful
 python3 quick_add.py "Buy milk @Groceries tomorrow 9am"
 python3 quick_add_filter.py "Buy milk"                     # live preview
 python3 quick_add_filter.py "Buy milk @Ta"                   # list completion

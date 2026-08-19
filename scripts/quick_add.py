@@ -8,32 +8,27 @@ Examples:
   remadd Buy milk @Groceries tomorrow 9am
   remadd Buy milk @Groceries tom 9am
   remadd Ship notes @Work !high friday 3pm #errand
-  remadd Pay rent due:2026-06-01 notes:autopay is off this month
+  remadd Pay rent /2026-06-01 notes:autopay is off this month
 
 A trailing due-date phrase is auto-detected (tomorrow/tom/mon/next
-friday/9am/2026-06-01/+3d/...) without needing a `due:` marker — see
+friday/9am/2026-06-01/+3d/...) without needing any marker at all — see
 `looks_like_due_token()` in _remctl.py for exactly what's recognized. This
 is a heuristic: a title that happens to end in a word like "Monday" will
-get parsed as a due date. Use an explicit `due:<phrase>` prefix (still
-supported, and still runs to the end of the query) to disambiguate. `notes:`
-works the same way and is never auto-detected, since free text can't be
-told apart from a due phrase by pattern alone.
+get parsed as a due date. Use an explicit `/<phrase>` prefix (or the
+longer `due:<phrase>`, still supported — both run to the end of the
+query) to disambiguate. `notes:` works the same way and is never
+auto-detected, since free text can't be told apart from a due phrase by
+pattern alone.
 """
-import subprocess
 import sys
 
-from _remctl import RemctlError, normalize_date_phrase, run, split_implicit_due
+from _remctl import RemctlError, looks_like_due_token, normalize_date_phrase, notify, run, split_implicit_due
 
 PRIORITY_MAP = {
     "h": "high", "high": "high",
     "m": "medium", "medium": "medium",
     "l": "low", "low": "low",
 }
-
-
-def notify(title, subtitle):
-    script = f'display notification {subtitle!r} with title {title!r}'
-    subprocess.run(["osascript", "-e", script], capture_output=True)
 
 
 def parse(query):
@@ -62,6 +57,20 @@ def parse(query):
             rest = tok[4:]
             if rest:
                 due_words.append(rest)
+            continue
+        # "/" is only recognized as the due-phrase marker when what
+        # follows actually looks date-like — otherwise a genuine leading
+        # slash in a title ("Check /health endpoint", a Unix path, a URL
+        # route) would get silently swallowed into the due phrase instead
+        # of staying part of the title, and the add would likely fail
+        # remctl's date parsing entirely instead of creating what was
+        # actually typed. Same token classifier the implicit auto-detect
+        # heuristic already uses, so "/" and unmarked auto-detection agree
+        # on what counts as date-like.
+        if tok.startswith("/") and len(tok) > 1 and looks_like_due_token(tok[1:]):
+            mode = "due"
+            explicit_due = True
+            due_words.append(tok[1:])
             continue
         if low.startswith("notes:"):
             mode = "notes"
