@@ -5,16 +5,29 @@ Three modes, all driven by a prefix on the query itself — Alfred re-invokes
 this same script on every keystroke/navigation, so "mode" just means "what
 does the current query string look like":
 
-  browse (default)   rem <scope> <text>          -> reminder list
-  menu:<id>           reached via Tab or Return     -> action menu for one item
-  edit:<id>:<text>     reached via the menu         -> retitle, typing <text>
-  due:<id>:<text>      reached via the menu         -> reschedule, typing <text>
-  movelist:<id>:<text> reached via the menu         -> move, picking a list
-  view:<id>            reached via the menu         -> read-only detail screen
+  browse (default)   rem <scope> <text>              -> reminder list
+  menu:<id>:<ret>     reached via Tab or Return         -> action menu for one item
+  edit:<id>:<ret>:<text>    reached via the menu        -> retitle, typing <text>
+  due:<id>:<ret>:<text>     reached via the menu        -> reschedule, typing <text>
+  movelist:<id>:<ret>:<text> reached via the menu       -> move, picking a list
+  view:<id>:<ret>     reached via the menu              -> read-only detail screen
   confirm:<action>:<id>:<value>  reached from a menu action or a filled-in
                        text entry/picker              -> one-line summary,
                        one more Return actually executes it (skip via the
                        CONFIRM_CHANGES=0 workflow variable)
+
+`<ret>` is the original browse query (percent-encoded via _encode_return()
+in every mode string above) — it's how "← Back to results" on the menu
+screen can re-render the exact scope/search you drilled in from, instead
+of resetting to bare `rem`. It rides through every drill-down level so
+that "← Back to actions" from a deeper screen (view/edit/due/movelist)
+still knows how to build the menu's own "← Back to results" afterward.
+build_browse_item() is where it originates (the live `rem` query at
+render time); every other producer of these mode strings just forwards
+whatever it was given. Percent-encoding keeps it colon-free so it can sit
+as one segment in an otherwise colon-delimited mode string without being
+confused for a delimiter, even when the browse query itself contains a
+literal colon.
 
 Browse-mode scope grammar (all optional, space separated):
   rem                     -> due today + overdue (remctl today)
@@ -64,6 +77,7 @@ import json
 import os
 import re
 import sys
+from urllib.parse import quote, unquote
 
 from _remctl import (
     RemctlError,
@@ -90,27 +104,38 @@ def _icon_kwargs():
     return {"icon": LIST_ICON} if LIST_ICON else {}
 
 
-def _back_item(reminder_id, label="← Back to actions"):
+def _encode_return(browse_query):
+    """The original browse query (e.g. "@Groceries", "milk", "" for bare
+    rem) travels alongside menu:<id> and every screen drilled into from
+    there, so "← Back to results" can re-render exactly what was being
+    browsed before — not just "today" or whatever DEFAULT_SCOPE is. Percent
+    -encoded (colon-safe) so it can sit as one segment in an otherwise
+    colon-delimited mode string without being confused for a delimiter,
+    even if the query itself contains a literal colon.
+    """
+    return quote(browse_query, safe="")
+
+
+def _back_item(reminder_id, return_q="", label="← Back to actions"):
     """A one-keypress way out of a drill-down screen (view/edit/due/
     movelist) back to the action menu, instead of manually backspacing the
-    query text. Backspacing still works and is still how you get all the
-    way back out to browse — there's no equivalent "back to search" item
-    on the menu itself, since the original browse scope (e.g. @Groceries)
-    isn't threaded through menu:<id> and can't be reconstructed here,
-    whereas the query text itself still has it.
+    query text. `return_q` (already percent-encoded, see _encode_return())
+    is threaded straight through so the action menu reached from here can
+    still offer its own "← Back to results" — going view -> back to
+    actions -> back to results doesn't lose the original browse scope.
     """
     return {
         "title": label,
         "subtitle": "Tab to return to the action menu",
         "valid": False,
-        "autocomplete": f"menu:{reminder_id}",
+        "autocomplete": f"menu:{reminder_id}:{return_q}",
     }
 
-MENU_RE = re.compile(r"^menu:(\d+)$")
-EDIT_RE = re.compile(r"^edit:(\d+):(.*)$", re.DOTALL)
-DUE_RE = re.compile(r"^due:(\d+):(.*)$", re.DOTALL)
-MOVE_RE = re.compile(r"^movelist:(\d+):(.*)$", re.DOTALL)
-VIEW_RE = re.compile(r"^view:(\d+)$")
+MENU_RE = re.compile(r"^menu:(\d+):(.*)$", re.DOTALL)
+EDIT_RE = re.compile(r"^edit:(\d+):([^:]*):(.*)$", re.DOTALL)
+DUE_RE = re.compile(r"^due:(\d+):([^:]*):(.*)$", re.DOTALL)
+MOVE_RE = re.compile(r"^movelist:(\d+):([^:]*):(.*)$", re.DOTALL)
+VIEW_RE = re.compile(r"^view:(\d+):(.*)$", re.DOTALL)
 CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|move):(\d+):(.*)$", re.DOTALL)
 
 
@@ -370,7 +395,7 @@ def build_subtitle(item):
     return "  ·  ".join(parts)
 
 
-def build_browse_item(item):
+def build_browse_item(item, browse_query=""):
     reminder_id = str(item.get("id"))
     title = item.get("title") or "(untitled)"
     base_vars = {"reminder_id": reminder_id, "reminder_title": title}
@@ -382,12 +407,15 @@ def build_browse_item(item):
     # Reminders.app" is still there as one of that screen's actions, just
     # no longer the accidental default. Tab and Return can't be routed to
     # two different screens from this one item — see the module docstring.
+    # browse_query (the exact `rem` scope/search text this row came from)
+    # rides along so the menu can offer "← Back to results" pointing at
+    # this same scope, not just whatever bare `rem` shows.
     result = {
         "uid": reminder_id,
         "title": title,
         "subtitle": build_subtitle(item),
         "valid": False,
-        "autocomplete": f"menu:{reminder_id}",
+        "autocomplete": f"menu:{reminder_id}:{_encode_return(browse_query)}",
     }
     # A modifier fires its variables immediately on Return — there's no
     # autocomplete-style drill-in for mods, so Shift+Return can't be routed
@@ -435,7 +463,7 @@ def render_browse(query):
     if not skip_completed_filter:
         items = [i for i in items if not i.get("completed")]
 
-    alfred_items = [build_browse_item(i) for i in items]
+    alfred_items = [build_browse_item(i, query) for i in items]
     if not alfred_items:
         alfred_items = [{
             "title": "No matching reminders",
@@ -455,10 +483,15 @@ MENU_ACTIONS = [
 ]
 
 
-def render_menu(reminder_id):
+def render_menu(reminder_id, return_q=""):
     """Actions only — no read-only detail lines mixed in here, so this
     stays a pure "what do you want to do" list; "View details" below is
     its own drill-in to render_view()'s separate read-only screen instead.
+
+    `return_q` (percent-encoded, from menu:<id>:<return_q>) is threaded
+    into every drill-in below so a screen reached from here can still find
+    its way back through the menu to the original browse results, and is
+    used directly for this screen's own "← Back to results" row.
     """
     try:
         info = run(["info", reminder_id], json_output=True)
@@ -499,7 +532,7 @@ def render_menu(reminder_id):
                 "title": label,
                 "subtitle": f"“{title}” — {hint}",
                 "valid": False,
-                "autocomplete": f"{drill_prefix}:{reminder_id}",
+                "autocomplete": f"{drill_prefix}:{reminder_id}:{return_q}",
             })
         else:
             # Change-title prefills the current title so adding a #tag (or
@@ -511,12 +544,22 @@ def render_menu(reminder_id):
                 "title": label,
                 "subtitle": f"“{title}” — {hint}",
                 "valid": False,
-                "autocomplete": f"{drill_prefix}:{reminder_id}:{prefill}",
+                "autocomplete": f"{drill_prefix}:{reminder_id}:{return_q}:{prefill}",
             })
+    # Back goes last, same reasoning as elsewhere: Alfred selects the first
+    # returned item by default, so a leading Back item would hijack a
+    # quick Return meant for the top action (e.g. "Mark as complete" when
+    # confirmation is off and it's valid:true).
+    items.append({
+        "title": "← Back to results",
+        "subtitle": "Tab to return to your previous search",
+        "valid": False,
+        "autocomplete": unquote(return_q),
+    })
     return {"items": items}
 
 
-def render_view(reminder_id):
+def render_view(reminder_id, return_q=""):
     try:
         info = run(["info", reminder_id], json_output=True)
     except RemctlError as exc:
@@ -548,11 +591,11 @@ def render_view(reminder_id):
         }
         for label, value in lines
     ]
-    items.append(_back_item(reminder_id))
+    items.append(_back_item(reminder_id, return_q))
     return {"items": items}
 
 
-def render_move_picker(reminder_id, partial):
+def render_move_picker(reminder_id, return_q, partial):
     """Picking a list name from the (live-filtered) matches is the whole
     input needed for a move — no separate free-text step like edit/
     reschedule. Smart lists are excluded since they're filtered views, not
@@ -574,7 +617,7 @@ def render_move_picker(reminder_id, partial):
             "title": f'No list matches "{partial}"' if partial else "No lists found",
             "subtitle": "Keep typing, or check the name in Reminders.app",
             "valid": False,
-        }, _back_item(reminder_id)]}
+        }, _back_item(reminder_id, return_q)]}
     if confirm_enabled():
         return {"items": [
             {
@@ -585,7 +628,7 @@ def render_move_picker(reminder_id, partial):
                 **_icon_kwargs(),
             }
             for name in matches
-        ] + [_back_item(reminder_id)]}
+        ] + [_back_item(reminder_id, return_q)]}
     return {"items": [
         {
             "title": name,
@@ -596,7 +639,7 @@ def render_move_picker(reminder_id, partial):
             **_icon_kwargs(),
         }
         for name in matches
-    ] + [_back_item(reminder_id)]}
+    ] + [_back_item(reminder_id, return_q)]}
 
 
 def render_confirm(action, reminder_id, value):
@@ -622,18 +665,31 @@ def render_confirm(action, reminder_id, value):
     return {"items": [item]}
 
 
-def render_text_input(reminder_id, action, typed_text, prompt_hint):
+def render_text_input(reminder_id, return_q, action, typed_text, prompt_hint):
+    # For reschedule specifically, show what the reminder is currently due
+    # so retyping isn't a guessing game — cached (not run()) since this
+    # re-fetches on every keystroke while typing and the due date can't
+    # have changed mid-typing; reminder_action.py clears the cache after
+    # any real mutation.
+    current_note = ""
+    if action == "reschedule":
+        try:
+            info = cached_run(f"info:{reminder_id}", ["info", reminder_id], ttl=CACHE_TTL)
+            current_note = f" — currently {humanize_due(info)}"
+        except RemctlError:
+            pass
+
     if typed_text and confirm_enabled():
         item = {
             "title": typed_text,
-            "subtitle": "Tab to review before confirming",
+            "subtitle": f"Tab to review before confirming{current_note}",
             "valid": False,
             "autocomplete": f"confirm:{action}:{reminder_id}:{typed_text}",
         }
     else:
         item = {
             "title": typed_text if typed_text else f"Type {prompt_hint}…",
-            "subtitle": f"↩ to confirm ({action})",
+            "subtitle": f"↩ to confirm ({action}){current_note}",
             "arg": typed_text,
             "valid": bool(typed_text),
             "variables": {"action": action, "reminder_id": reminder_id},
@@ -643,7 +699,7 @@ def render_text_input(reminder_id, action, typed_text, prompt_hint):
     # Return/Tab right after typing a value would activate Back instead of
     # submitting/reviewing what was just typed (caught in review: this
     # would have silently discarded typed input on every edit/reschedule).
-    return {"items": [item, _back_item(reminder_id)]}
+    return {"items": [item, _back_item(reminder_id, return_q)]}
 
 
 def main():
@@ -651,7 +707,7 @@ def main():
 
     menu_match = MENU_RE.match(query)
     if menu_match:
-        print(json.dumps(render_menu(menu_match.group(1))))
+        print(json.dumps(render_menu(menu_match.group(1), menu_match.group(2))))
         return
 
     confirm_match = CONFIRM_RE.match(query)
@@ -662,28 +718,28 @@ def main():
 
     edit_match = EDIT_RE.match(query)
     if edit_match:
-        reminder_id, typed = edit_match.group(1), edit_match.group(2)
-        print(json.dumps(render_text_input(reminder_id, "edit", typed, "a new title")))
+        reminder_id, return_q, typed = edit_match.group(1), edit_match.group(2), edit_match.group(3)
+        print(json.dumps(render_text_input(reminder_id, return_q, "edit", typed, "a new title")))
         return
 
     due_match = DUE_RE.match(query)
     if due_match:
-        reminder_id, typed = due_match.group(1), due_match.group(2)
-        print(json.dumps(render_text_input(reminder_id, "reschedule", typed, "a due date, e.g. tomorrow 9am")))
+        reminder_id, return_q, typed = due_match.group(1), due_match.group(2), due_match.group(3)
+        print(json.dumps(render_text_input(reminder_id, return_q, "reschedule", typed, "a due date, e.g. tomorrow 9am")))
         return
 
     move_match = MOVE_RE.match(query)
     if move_match:
-        reminder_id, typed = move_match.group(1), move_match.group(2)
+        reminder_id, return_q, typed = move_match.group(1), move_match.group(2), move_match.group(3)
         try:
-            print(json.dumps(render_move_picker(reminder_id, typed)))
+            print(json.dumps(render_move_picker(reminder_id, return_q, typed)))
         except RemctlError as exc:
             print(json.dumps({"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}))
         return
 
     view_match = VIEW_RE.match(query)
     if view_match:
-        print(json.dumps(render_view(view_match.group(1))))
+        print(json.dumps(render_view(view_match.group(1), view_match.group(2))))
         return
 
     print(json.dumps(render_browse(query)))

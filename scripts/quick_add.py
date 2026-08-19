@@ -8,16 +8,17 @@ Examples:
   remadd Buy milk @Groceries tomorrow 9am
   remadd Buy milk @Groceries tom 9am
   remadd Ship notes @Work !high friday 3pm #errand
-  remadd Pay rent due:2026-06-01 notes:autopay is off this month
+  remadd Pay rent /2026-06-01 notes:autopay is off this month
 
 A trailing due-date phrase is auto-detected (tomorrow/tom/mon/next
-friday/9am/2026-06-01/+3d/...) without needing a `due:` marker — see
+friday/9am/2026-06-01/+3d/...) without needing any marker at all — see
 `looks_like_due_token()` in _remctl.py for exactly what's recognized. This
 is a heuristic: a title that happens to end in a word like "Monday" will
-get parsed as a due date. Use an explicit `due:<phrase>` prefix (still
-supported, and still runs to the end of the query) to disambiguate. `notes:`
-works the same way and is never auto-detected, since free text can't be
-told apart from a due phrase by pattern alone.
+get parsed as a due date. Use an explicit `/<phrase>` prefix (or the
+longer `due:<phrase>`, still supported — both run to the end of the
+query) to disambiguate. `notes:` works the same way and is never
+auto-detected, since free text can't be told apart from a due phrase by
+pattern alone.
 """
 import subprocess
 import sys
@@ -56,10 +57,10 @@ def parse(query):
             mode = None
             priority = PRIORITY_MAP[low[1:]]
             continue
-        if low.startswith("due:"):
+        if low.startswith("due:") or (tok.startswith("/") and len(tok) > 1):
             mode = "due"
             explicit_due = True
-            rest = tok[4:]
+            rest = tok[4:] if low.startswith("due:") else tok[1:]
             if rest:
                 due_words.append(rest)
             continue

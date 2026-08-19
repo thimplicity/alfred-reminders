@@ -154,7 +154,7 @@ def render_preview(query):
         f"@{parsed['list']}" if parsed["list"] else "@list",
         " ".join(f"#{t}" for t in parsed["tags"]) if parsed["tags"] else "#tag",
         f"!{parsed['priority']}" if parsed["priority"] else "!priority",
-        f"due {parsed['due']}" if parsed["due"] else "due",
+        f"due {parsed['due']}" if parsed["due"] else "/due",
         f"notes: {parsed['notes']}" if parsed["notes"] else "notes:",
     ]
 
