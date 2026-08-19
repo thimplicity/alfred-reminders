@@ -11,9 +11,10 @@ keystroke reflects the change immediately.
 import glob
 import os
 import re
+import subprocess
 import sys
 
-from _remctl import CACHE_DIR, RemctlError, normalize_date_phrase, run
+from _remctl import CACHE_DIR, RemctlError, items_from, normalize_date_phrase, run
 
 _TAG_TOKEN_RE = re.compile(r"(?:(?<=\s)|^)#(\S+) ?")
 
@@ -24,6 +25,47 @@ def clear_cache():
             os.remove(path)
         except OSError:
             pass
+
+
+def notify(title, subtitle):
+    script = f'display notification {subtitle!r} with title {title!r}'
+    subprocess.run(["osascript", "-e", script], capture_output=True)
+
+
+def bulk_reschedule_overdue(target):
+    """Fetches the overdue set fresh at execution time (not whatever was
+    overdue when the confirm screen rendered — the two can drift by
+    however long the user took to read and confirm) and reschedules every
+    one of them to `target` ("today" or "tomorrow"). One reminder failing
+    doesn't stop the rest; failures are collected and reported together.
+    """
+    payload = run(["overdue"], json_output=True)
+    items = items_from(payload)
+    if not items:
+        notify("Reminders", "No overdue reminders to reschedule.")
+        return
+
+    succeeded = 0
+    failures = []
+    for item in items:
+        reminder_id = str(item.get("id"))
+        try:
+            run(["edit", reminder_id, "-d", target], json_output=False)
+            succeeded += 1
+        except RemctlError as exc:
+            failures.append(f'{item.get("title") or reminder_id}: {exc}')
+
+    if failures:
+        detail = "; ".join(failures[:3])
+        if len(failures) > 3:
+            detail += f"; +{len(failures) - 3} more"
+        notify(
+            "Reminders — bulk reschedule",
+            f"Rescheduled {succeeded} to {target}, {len(failures)} failed ({detail})",
+        )
+    else:
+        plural = "s" if succeeded != 1 else ""
+        notify("Reminders", f"Rescheduled {succeeded} overdue reminder{plural} to {target}")
 
 
 def extract_tags(text):
@@ -51,6 +93,18 @@ def main():
     action = os.environ.get("action")
     reminder_id = os.environ.get("reminder_id")
     typed_text = sys.argv[1] if len(sys.argv) > 1 else ""
+
+    # Bulk actions operate on a whole scope, not one reminder_id — handled
+    # before the reminder_id check below, which every other action needs.
+    if action == "bulk_reschedule_overdue":
+        target = os.environ.get("target") or "today"
+        try:
+            bulk_reschedule_overdue(target)
+        except RemctlError as exc:
+            print(f"{exc}\n{exc.stderr}", file=sys.stderr)
+            sys.exit(1)
+        clear_cache()
+        return
 
     if not reminder_id:
         print("Missing reminder_id — action aborted.", file=sys.stderr)

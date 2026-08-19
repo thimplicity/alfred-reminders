@@ -95,6 +95,21 @@ structure" below; the scripts themselves don't change.
 | `rem upcoming [N]` | Due within N days (default 7) |
 | `rem flagged` | Flagged reminders |
 | `rem overdue` | Overdue only |
+| `rem overdue today` / `rem overdue tomorrow` | **Bulk reschedule** every overdue reminder to today/tomorrow in one shot |
+
+**Bulk rescheduling overdue reminders**: `rem overdue today` (or
+`tomorrow`) doesn't browse — it's a single confirm-style row, "Reschedule
+all N overdue reminders to today," and one more Return actually does it.
+This always shows that confirm step, even with `CONFIRM_CHANGES=0` —
+touching every overdue reminder at once is higher-stakes than a normal
+single-item edit, so it isn't worth letting that variable skip review
+here. The set of reminders to reschedule is fetched fresh at the moment
+you confirm (not whatever was overdue when the screen first rendered), a
+macOS notification reports how many succeeded (and any failures, up to
+3 named), and one reminder failing doesn't stop the rest from being
+rescheduled. There's no way to hand-pick a subset — Alfred's results list
+has no multi-select, so it's genuinely all-or-nothing per invocation; use
+the normal per-reminder Reschedule… menu action for anything selective.
 
 **Changing what `rem` alone shows**: by default an empty query is "due
 today + overdue," which is legitimately empty whenever nothing's due or
@@ -403,6 +418,8 @@ python3 list_reminders.py "view:23880:%40Work"               # read-only detail 
 python3 list_reminders.py "confirm:done:23880:"                    # confirm-step preview
 CONFIRM_CHANGES=0 python3 list_reminders.py "edit:23880:%40Work:New title"   # with confirm disabled
 action=done reminder_id=23880 python3 reminder_action.py
+python3 list_reminders.py "overdue today"              # bulk-reschedule confirm preview (read-only)
+action=bulk_reschedule_overdue target=today python3 reminder_action.py   # actually reschedules every overdue reminder — careful
 python3 quick_add.py "Buy milk @Groceries tomorrow 9am"
 python3 quick_add_filter.py "Buy milk"                     # live preview
 python3 quick_add_filter.py "Buy milk @Ta"                   # list completion

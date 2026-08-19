@@ -42,6 +42,11 @@ Browse-mode scope grammar (all optional, space separated):
   rem upcoming [N]        -> due within N days (default 7)
   rem flagged             -> flagged reminders
   rem overdue             -> overdue only
+  rem overdue today       -> bulk-reschedule every overdue reminder to
+  rem overdue tomorrow       today/tomorrow — a confirm-style single item
+                              (always shown, regardless of CONFIRM_CHANGES —
+                              see render_bulk_reschedule_confirm()), not a
+                              real browse list
 
 `@` and `#` both double as live pickers: if what follows doesn't exactly
 match a real list/smart-list (for `@`) or a known tag (for `#`), instead of
@@ -439,8 +444,39 @@ def build_browse_item(item, browse_query=""):
 # Modes
 # ---------------------------------------------------------------------------
 
+def render_bulk_reschedule_confirm(target):
+    """`rem overdue today` / `rem overdue tomorrow` — a one-click way to
+    clear out the overdue pile without touching each reminder one at a
+    time. Always shows this confirm-style summary before executing,
+    regardless of CONFIRM_CHANGES — a bulk mutation across every overdue
+    reminder is higher-stakes than a single edit, so it isn't worth
+    letting that variable silently skip review here.
+    """
+    try:
+        payload = cached_run("scope:overdue", ["overdue"], ttl=CACHE_TTL)
+    except RemctlError as exc:
+        return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
+    count = len(items_from(payload))
+    if count == 0:
+        return {"items": [{
+            "title": "No overdue reminders",
+            "subtitle": "Nothing to reschedule",
+            "valid": False,
+        }]}
+    return {"items": [{
+        "title": f"Reschedule all {count} overdue reminder{'s' if count != 1 else ''} to {target}",
+        "subtitle": "↩ to confirm, or backspace the query to cancel",
+        "arg": target,
+        "valid": True,
+        "variables": {"action": "bulk_reschedule_overdue", "target": target},
+    }]}
+
+
 def render_browse(query):
     tokens = query.split()
+
+    if len(tokens) == 2 and tokens[0].lower() == "overdue" and tokens[1].lower() in ("today", "tomorrow"):
+        return render_bulk_reschedule_confirm(tokens[1].lower())
 
     try:
         items, free_text, skip_completed_filter = fetch_scope(tokens)
