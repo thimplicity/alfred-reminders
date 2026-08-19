@@ -137,26 +137,29 @@ erroring on partial text — shows every list/smart-list or tag whose name
 contains what you've typed so far (`@` with nothing after it lists
 everything). These are `valid: false` `autocomplete` items, so Tab (not
 Return) fills in the exact name and immediately shows that scope — no
-separate confirm step needed. Every row representing a list (this picker,
-"Move to another list…", and `remadd`'s `@` completion) shows
-Reminders.app's own icon (`reminders_app_icon()` in `scripts/_remctl.py`)
-so list rows read as "this is a list" at a glance. The action menu's own
-six rows are each visually distinct too (`MENU_ICONS` in
-`scripts/list_reminders.py`). Five of the six borrow another installed
-app's Finder icon rather than bundling a custom asset — just
-`{"type": "fileicon", "path": "..."}` pointing at whatever app already
-has a matching icon: Calendar for Reschedule, TextEdit for Change title,
-a generic macOS folder icon for Move to another list, System Information
-for View details, and Reminders.app itself for Open in Reminders.app.
-Those degrade to Alfred's default icon if the app they point at isn't
-installed — see `app_icon()` in `scripts/_remctl.py`. **Mark as
-complete** is the one exception: deliberately *not* another app's brand
-logo (an earlier version borrowed Todoist's, then TickTick's, both
-rejected as "not another app's icon") — it's `icons/mark_complete.png`,
-a plain green checkmark rendered once from Apple's own SF Symbol
-`checkmark.circle.fill` and committed as a bundled asset (see
-"Extending" below for how it was generated, if it ever needs
-regenerating at a different size/color).
+separate confirm step needed. Every row representing a list (this picker
+and `remadd`'s `@` completion) shows Reminders.app's own icon
+(`reminders_app_icon()` in `scripts/_remctl.py`) so list rows read as
+"this is a list" at a glance. The action menu's own rows are each
+visually distinct too (`MENU_ICONS` in `scripts/list_reminders.py`).
+Four borrow another installed app's Finder icon rather than bundling a
+custom asset — just `{"type": "fileicon", "path": "..."}` pointing at
+whatever app already has a matching icon: Calendar for Reschedule,
+TextEdit for Change title, System Information for View details, and
+Reminders.app itself for Open in Reminders.app. Those degrade to
+Alfred's default icon if the app they point at isn't installed — see
+`app_icon()` in `scripts/_remctl.py`. **Mark as complete**, **Set
+priority…**, and **Flag**/**Unflag** are the exceptions: deliberately
+*not* another app's brand logo (an earlier version borrowed Todoist's,
+then TickTick's, both
+rejected as "not another app's icon") — each is a bundled asset
+(`icons/mark_complete.png`, `icons/priority.png`, `icons/flag.png`)
+rendered once from an Apple SF Symbol (`checkmark.circle.fill`,
+`exclamationmark.circle.fill`, `flag.fill` respectively) rather than
+borrowed from anywhere (see "Extending" below for how they were
+generated, if they ever need regenerating at a different size/color).
+View details (`view:<id>`) reuses several of the same bundled/borrowed
+icons per detail line — see `VIEW_ICONS` further down.
 
 **Smart lists**: `remctl` can inspect a smart list's filter definition but
 has no command to fetch its live contents, so `@Name` tries a real list
@@ -202,27 +205,30 @@ The action menu, in order:
 1. **Mark as complete**
 2. **Reschedule…**
 3. **Change title…**
-4. **Move to another list…**
-5. **Set priority…**
-6. **Flag** / **Unflag** — label and target action switch based on the
+4. **Set priority…**
+5. **Flag** / **Unflag** — label and target action switch based on the
    reminder's current flagged state, computed fresh each time the menu
    renders (not a static label)
-7. **View details**
-8. **Open in Reminders.app**
+6. **View details**
+7. **Open in Reminders.app**
 
-Reschedule, change-title, move, set-priority, and view-details all need a
+There's deliberately no "Move to another list…" — see "Known
+limitation" below for why it was removed rather than left broken or
+worked around.
+
+Reschedule, change-title, set-priority, and view-details all need a
 follow-up value or more screen space than a modifier+Return can give (a
 modifier is a one-shot fire-and-forget action, not an interactive prompt
 or a second screen), which is why they live in the menu rather than on a
 modifier key. Flag/Unflag doesn't need a follow-up value — it's a
 same-shape one-shot action as Mark as complete (drills into confirm
 first when `CONFIRM_CHANGES` is on, fires directly otherwise). Tab into
-the menu, then Tab again on "Reschedule…" / "Change title…" / "Move to
-another list…" / "Set priority…" / "View details" drops you into a
-text-entry prompt, picker, or read-only detail screen — these are
+the menu, then Tab again on "Reschedule…" / "Change title…" /
+"Set priority…" / "View details" drops you into a text-entry prompt,
+picker, or read-only detail screen — these are
 `valid: false` items, so only Tab reliably applies their `autocomplete`.
-Each of those screens (View details, Reschedule, Change title, Move to
-another list) also includes a **"← Back to actions"** row — Tab it to
+Each of those screens (View details, Reschedule, Change title, Set
+priority…) also includes a **"← Back to actions"** row — Tab it to
 jump straight back to that reminder's action menu instead of retyping or
 backspacing, e.g. View details then straight into Reschedule without
 leaving the reminder. The action menu itself also has a **"← Back to
@@ -233,7 +239,7 @@ resetting to bare `rem` — the original browse query rides along
 down, so going View details → back to actions → back to results still
 lands you exactly where you started, not just "the menu" or "today."
 Both Back rows are placed *after* the working result (the typed value,
-the list matches, or the menu's own actions), not before — Alfred
+the priority choices, or the menu's own actions), not before — Alfred
 selects the first returned item by default, so a leading Back row would
 otherwise hijack a type-then-Return/Tab submission and silently discard
 whatever was just typed instead of confirming it, or hijack a quick
@@ -268,10 +274,10 @@ There's no delete anywhere in this workflow — use Reminders.app directly
 for that.
 
 **Confirmation step**: every mutation (Mark as complete, Reschedule,
-Change title, Move to another list, Set priority, Flag/Unflag) shows a
-one-line summary — "Mark 'Buy milk' as complete", "Move 'Buy milk' to
-'Groceries'" — that needs one more Return before it actually calls
-`remctl`. This is on by default; set the `CONFIRM_CHANGES` workflow
+Change title, Set priority, Flag/Unflag) shows a one-line summary —
+"Mark 'Buy milk' as complete", "Set 'Buy milk''s priority to high" —
+that needs one more Return before it actually calls `remctl`. This is
+on by default; set the `CONFIRM_CHANGES` workflow
 variable to `0` (Alfred's workflow configuration sheet, or edit
 `info.plist`'s top-level `variables` dict) to
 skip straight to executing instead. Open/View details are never confirmed
@@ -290,26 +296,32 @@ pulled out and added via `remctl edit --private -t`, rather than left as
 literal `#tag` characters in the title — plain `--title` never
 auto-converts hashtag-looking text into a tag (verified directly against
 a real reminder: `tags` stayed `null` after creating one with `#word` in
-the title). Reschedule and move don't prefill, since a stale due date or
-list name isn't a useful starting point for either.
+the title). Reschedule and set-priority don't prefill, since a stale due
+date or priority isn't a useful starting point for either.
 
-**Move to another list…** is a live-filtered picker over real lists only
-(not smart lists, since those are filtered views, not containers) —
-picking one completes the move immediately, no further typing needed.
-
-**Known limitation**: moving a reminder between lists calls `remctl edit
-ID -l LIST`, which is documented to fall back to a verified clone-delete
-when EventKit rejects a plain move across a list/container boundary. On
-at least one test machine this instead surfaces a raw
-`com.apple.reminderkit error -3002` — reproduced identically calling
-`remctl` directly (with and without `--private`, and with `--list-id`
-instead of `-l`), so it's a remctl/EventKit behavior on that Mac, not a
-bug in this workflow's scripts. Re-verified current as of remctl 1.7.1
-(the latest release at the time) with `remctl doctor` reporting a clean
-setup, and no matching issue open on the remctl repo. If you hit this,
-it's worth checking whether it's specific to certain lists (e.g.
-Groceries) or all moves on your machine, and reporting to the remctl
-project if it's the latter.
+**Known limitation — no "Move to another list…"**: this workflow
+originally had one, calling `remctl edit ID -l LIST` (documented to fall
+back to a verified clone-delete when EventKit rejects a plain move across
+a list/container boundary). On at least one test machine this instead
+surfaced a raw `com.apple.reminderkit error -3002` every time —
+reproduced identically calling `remctl` directly (with and without
+`--private`, and with `--list-id` instead of `-l`), confirmed via
+`remctl doctor` (clean setup) and remctl's GitHub (no matching open
+issue, and the installed version was already the latest release) to be a
+remctl/EventKit bug on that Mac, not something wrong in this workflow's
+scripts. A manual clone-into-target-list-then-delete workaround was
+prototyped and does work — title, due date, priority, tags, flag, notes,
+and even image attachments (`remctl info`'s `attachments[].path` points
+at a real local file `remctl add --private --image` can re-consume) all
+carry over cleanly — but it always assigns the reminder a new ID and
+creation date, and doesn't carry over subtasks, recurrence, URL,
+sections, or shared-list assignments (none of which this workflow's own
+actions manage anyway, but still a real semantic difference from an
+actual move). Weighed against that, the action was removed rather than
+shipped broken or as an imperfect workaround. If you hit the same
+`-3002` error using `remctl` directly for your own purposes, it's worth
+checking whether it's specific to certain lists (e.g. Groceries) or all
+moves on your machine, and reporting to the remctl project.
 
 ### `remadd` — quick add
 
@@ -399,10 +411,10 @@ A macOS notification confirms success or reports the failure.
 
 Two objects per keyword, one plain connection each — no modifier-gated
 routing anywhere. `list_reminders.py` handles browse, the Tab/Return
-action menu, the edit/reschedule/move text-entry prompts and picker, the
-read-only details screen, *and* the confirm-step summary all in one
+action menu, the edit/reschedule/priority text-entry prompts and picker,
+the read-only details screen, *and* the confirm-step summary all in one
 script, branching on a prefix in the query string itself (`menu:<id>:<ret>`,
-`edit:<id>:<ret>:<text>`, `due:<id>:<ret>:<text>`, `movelist:<id>:<ret>:<text>`,
+`edit:<id>:<ret>:<text>`, `due:<id>:<ret>:<text>`, `priority:<id>:<ret>:<text>`,
 `view:<id>:<ret>`, `confirm:<action>:<id>:<value>` — see the module
 docstring for what `<ret>` is).
 `quick_add_filter.py` similarly handles both the `@`/`#`/`!` live
@@ -465,7 +477,6 @@ python3 list_reminders.py "milk"                          # search
 python3 list_reminders.py "menu:23880:%40Work"              # action menu, "back to results" -> @Work
 python3 list_reminders.py "edit:23880:%40Work:New title"    # edit text-entry preview
 python3 list_reminders.py "due:23880:%40Work:tom 9am"       # reschedule text-entry preview (shows current due date too)
-python3 list_reminders.py "movelist:23880:%40Work:Gro"      # move-to-list picker preview
 python3 list_reminders.py "priority:23880:%40Work:hi"        # priority picker preview (filters to High)
 python3 list_reminders.py "view:23880:%40Work"               # read-only detail screen, one icon per line
 python3 list_reminders.py "confirm:done:23880:"                    # confirm-step preview

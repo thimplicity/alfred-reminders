@@ -9,18 +9,22 @@ does the current query string look like":
   menu:<id>:<ret>     reached via Tab or Return         -> action menu for one item
   edit:<id>:<ret>:<text>    reached via the menu        -> retitle, typing <text>
   due:<id>:<ret>:<text>     reached via the menu        -> reschedule, typing <text>
-  movelist:<id>:<ret>:<text> reached via the menu       -> move, picking a list
+  priority:<id>:<ret>:<text> reached via the menu       -> set priority, picking one
   view:<id>:<ret>     reached via the menu              -> read-only detail screen
   confirm:<action>:<id>:<value>  reached from a menu action or a filled-in
                        text entry/picker              -> one-line summary,
                        one more Return actually executes it (skip via the
                        CONFIRM_CHANGES=0 workflow variable)
 
+There is deliberately no "move to another list" mode — see the "Move to
+another list" note further down for why it was removed rather than kept
+broken or worked around.
+
 `<ret>` is the original browse query (percent-encoded via _encode_return()
 in every mode string above) — it's how "← Back to results" on the menu
 screen can re-render the exact scope/search you drilled in from, instead
 of resetting to bare `rem`. It rides through every drill-down level so
-that "← Back to actions" from a deeper screen (view/edit/due/movelist)
+that "← Back to actions" from a deeper screen (view/edit/due/priority)
 still knows how to build the menu's own "← Back to results" afterward.
 build_browse_item() is where it originates (the live `rem` query at
 render time); every other producer of these mode strings just forwards
@@ -60,8 +64,8 @@ that needs no further input; there's no delete anywhere in this workflow
 — use Reminders.app for that). Return used to open the reminder directly
 in Reminders.app, which was too easy to trigger by accident when what you
 actually wanted was more info — now both Tab and Return drill into the
-action menu (reschedule/change-title/move/view-details also live there,
-since those need a follow-up text entry, picker, or just more screen
+action menu (reschedule/change-title/set-priority/view-details also live
+there, since those need a follow-up text entry, picker, or just more screen
 space than a modifier+Return can provide, and "Open in Reminders.app" is
 still one of the menu's actions, just no longer the default). Tab and
 Return can't be made to land on two *different* screens here — Alfred
@@ -134,15 +138,13 @@ DUE_ICON = app_icon("/System/Applications/Calendar.app")
 # One icon per action-menu row, so the menu isn't a wall of identical
 # default icons — each keyed by the MENU_ACTIONS `action` or `drill_prefix`
 # (whichever is set). Beyond the bundled assets above, the rest borrow
-# other installed apps' Finder icons: TextEdit for retitling, a generic
-# Finder folder for moving between lists, and System Information's icon
-# for "more info about this." Those entries degrade to no icon (Alfred's
-# default) if the app they point at isn't installed.
+# other installed apps' Finder icons: TextEdit for retitling, and System
+# Information's icon for "more info about this." Those entries degrade to
+# no icon (Alfred's default) if the app they point at isn't installed.
 MENU_ICONS = {
     "done": MARK_COMPLETE_ICON,
     "due": DUE_ICON,
     "edit": app_icon("/System/Applications/TextEdit.app"),
-    "movelist": {"type": "filetype", "path": "public.folder"},
     "priority": PRIORITY_ICON,
     "flag": FLAG_ICON,
     "unflag": FLAG_ICON,
@@ -182,7 +184,7 @@ def _encode_return(browse_query):
 
 def _back_item(reminder_id, return_q="", label="← Back to actions"):
     """A one-keypress way out of a drill-down screen (view/edit/due/
-    movelist) back to the action menu, instead of manually backspacing the
+    priority) back to the action menu, instead of manually backspacing the
     query text. `return_q` (already percent-encoded, see _encode_return())
     is threaded straight through so the action menu reached from here can
     still offer its own "← Back to results" — going view -> back to
@@ -198,10 +200,9 @@ def _back_item(reminder_id, return_q="", label="← Back to actions"):
 MENU_RE = re.compile(r"^menu:(\d+):(.*)$", re.DOTALL)
 EDIT_RE = re.compile(r"^edit:(\d+):([^:]*):(.*)$", re.DOTALL)
 DUE_RE = re.compile(r"^due:(\d+):([^:]*):(.*)$", re.DOTALL)
-MOVE_RE = re.compile(r"^movelist:(\d+):([^:]*):(.*)$", re.DOTALL)
 PRIORITY_RE = re.compile(r"^priority:(\d+):([^:]*):(.*)$", re.DOTALL)
 VIEW_RE = re.compile(r"^view:(\d+):(.*)$", re.DOTALL)
-CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|move|flag|unflag|priority):(\d+):(.*)$", re.DOTALL)
+CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|flag|unflag|priority):(\d+):(.*)$", re.DOTALL)
 
 
 def confirm_enabled():
@@ -579,7 +580,6 @@ MENU_ACTIONS_MAIN = [
     ("Mark as complete", "done", None, None, False, True),
     ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am", False, None),
     ("Change title…", None, "edit", "type a new title, or add #tag to tag it", True, None),
-    ("Move to another list…", None, "movelist", "type or pick a list", False, None),
     ("Set priority…", None, "priority", "pick none, low, medium, or high", False, None),
 ]
 MENU_ACTIONS_TAIL = [
@@ -593,9 +593,9 @@ def _menu_action_item(entry, reminder_id, return_q, title):
     if action and needs_confirm and confirm_enabled():
         # "Mark as complete" is the only menu entry that both mutates
         # and fires with no further typing, so it's the only one that
-        # needs its own confirm drill-in here — edit/reschedule/move
+        # needs its own confirm drill-in here — edit/reschedule/priority
         # route through confirm from render_text_input()/
-        # render_move_picker() instead, once a value exists to show.
+        # render_priority_picker() instead, once a value exists to show.
         return {
             "title": label,
             "subtitle": f"“{title}” — review before confirming",
@@ -733,53 +733,6 @@ def render_view(reminder_id, return_q=""):
     return {"items": items}
 
 
-def render_move_picker(reminder_id, return_q, partial):
-    """Picking a list name from the (live-filtered) matches is the whole
-    input needed for a move — no separate free-text step like edit/
-    reschedule. Smart lists are excluded since they're filtered views, not
-    real containers a reminder can be moved into. When confirmation is
-    enabled, picking a match still drills one more step into confirm:...
-    rather than firing immediately.
-    """
-    needle = partial.lower()
-    matches = sorted(
-        name for name, kind in fetch_list_and_smart_list_names()
-        if kind == "List" and needle in name.lower()
-    )
-    # Back goes after the matches, not before — Alfred selects the first
-    # returned item by default, so a leading Back item would hijack a
-    # type-then-Return pick of the top match (same issue caught in review
-    # for render_text_input(), below).
-    if not matches:
-        return {"items": [{
-            "title": f'No list matches "{partial}"' if partial else "No lists found",
-            "subtitle": "Keep typing, or check the name in Reminders.app",
-            "valid": False,
-        }, _back_item(reminder_id, return_q)]}
-    if confirm_enabled():
-        return {"items": [
-            {
-                "title": name,
-                "subtitle": "Tab to review before confirming",
-                "valid": False,
-                "autocomplete": f"confirm:move:{reminder_id}:{name}",
-                **_icon_kwargs(),
-            }
-            for name in matches
-        ] + [_back_item(reminder_id, return_q)]}
-    return {"items": [
-        {
-            "title": name,
-            "subtitle": "Move here",
-            "arg": name,
-            "valid": True,
-            "variables": {"action": "move", "reminder_id": reminder_id},
-            **_icon_kwargs(),
-        }
-        for name in matches
-    ] + [_back_item(reminder_id, return_q)]}
-
-
 PRIORITY_CHOICES = [("None", "none"), ("Low", "low"), ("Medium", "medium"), ("High", "high")]
 
 
@@ -833,7 +786,6 @@ def render_confirm(action, reminder_id, value):
         "done": f"Mark “{title}” as complete",
         "edit": f"Change “{title}”'s title to “{value}”",
         "reschedule": f"Reschedule “{title}” to “{value}”",
-        "move": f"Move “{title}” to “{value}”",
         "flag": f"Flag “{title}”",
         "unflag": f"Unflag “{title}”",
         "priority": f"Set “{title}”'s priority to {value}",
@@ -909,15 +861,6 @@ def main():
     if due_match:
         reminder_id, return_q, typed = due_match.group(1), due_match.group(2), due_match.group(3)
         print(json.dumps(render_text_input(reminder_id, return_q, "reschedule", typed, "a due date, e.g. tomorrow 9am")))
-        return
-
-    move_match = MOVE_RE.match(query)
-    if move_match:
-        reminder_id, return_q, typed = move_match.group(1), move_match.group(2), move_match.group(3)
-        try:
-            print(json.dumps(render_move_picker(reminder_id, return_q, typed)))
-        except RemctlError as exc:
-            print(json.dumps({"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}))
         return
 
     priority_match = PRIORITY_RE.match(query)
