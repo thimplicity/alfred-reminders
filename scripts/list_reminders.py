@@ -113,14 +113,14 @@ def _icon_kwargs():
 # One borrowed system-app icon per action-menu row, so the menu isn't a
 # wall of identical default icons — each keyed by the MENU_ACTIONS `action`
 # or `drill_prefix` (whichever is set), matched loosely by what the action
-# actually *is*: Todoist is the closest thing to a natural "mark complete"
-# checkmark on a stock Mac (fitting, since this workflow is itself modeled
-# on Todoist's own Alfred workflow), Calendar for scheduling, TextEdit for
-# retitling, a generic Finder folder for moving between lists, and System
-# Information's icon for "more info about this." Every entry degrades to
-# no icon (Alfred's default) if the app it points at isn't installed.
+# actually *is*: TickTick's own brand icon is a literal checkmark ("tick"),
+# a closer match for "mark complete" than any generic system icon, Calendar
+# for scheduling, TextEdit for retitling, a generic Finder folder for
+# moving between lists, and System Information's icon for "more info about
+# this." Every entry degrades to no icon (Alfred's default) if the app it
+# points at isn't installed.
 MENU_ICONS = {
-    "done": app_icon("/Applications/Todoist.app"),
+    "done": app_icon("/Applications/TickTick.app"),
     "due": app_icon("/System/Applications/Calendar.app"),
     "edit": app_icon("/System/Applications/TextEdit.app"),
     "movelist": {"type": "filetype", "path": "public.folder"},

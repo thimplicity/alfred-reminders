@@ -145,14 +145,14 @@ six rows are each visually distinct too (`MENU_ICONS` in
 `scripts/list_reminders.py`), borrowing icons from other installed apps
 rather than bundling custom assets — no icon-drawing tools involved, just
 `{"type": "fileicon", "path": "..."}` pointing at whatever app already
-has a matching Finder icon: Todoist for Mark as complete (fitting, since
-this workflow is itself modeled on Todoist's own Alfred workflow),
-Calendar for Reschedule, TextEdit for Change title, a generic macOS
-folder icon for Move to another list, System Information for View
-details, and Reminders.app itself for Open in Reminders.app. Each entry
-degrades to Alfred's default icon if the app it points at isn't
-installed (Todoist specifically, being third-party) — see `app_icon()`
-in `scripts/_remctl.py`.
+has a matching Finder icon: TickTick for Mark as complete (its own brand
+icon is a literal checkmark/"tick" — a closer match than any generic
+system icon), Calendar for Reschedule, TextEdit for Change title, a
+generic macOS folder icon for Move to another list, System Information
+for View details, and Reminders.app itself for Open in Reminders.app.
+Each entry degrades to Alfred's default icon if the app it points at
+isn't installed (TickTick specifically, being third-party) — see
+`app_icon()` in `scripts/_remctl.py`.
 
 **Smart lists**: `remctl` can inspect a smart list's filter definition but
 has no command to fetch its live contents, so `@Name` tries a real list
