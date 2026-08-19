@@ -534,8 +534,11 @@ def render_view(reminder_id):
         ("Tags", ", ".join(info.get("tags") or []) or "none"),
         ("Notes", info.get("notes") or "none"),
     ]
-    items = [_back_item(reminder_id)]
-    items += [
+    # Back goes after the detail lines, not before — Alfred selects the
+    # first returned item by default, and a leading Back item would hijack
+    # a quick Return on this screen (meant to open the reminder) into
+    # going back to the menu instead.
+    items = [
         {
             "title": f"{label}: {value}",
             "subtitle": "↩ to open in Reminders.app",
@@ -545,6 +548,7 @@ def render_view(reminder_id):
         }
         for label, value in lines
     ]
+    items.append(_back_item(reminder_id))
     return {"items": items}
 
 
@@ -561,14 +565,18 @@ def render_move_picker(reminder_id, partial):
         name for name, kind in fetch_list_and_smart_list_names()
         if kind == "List" and needle in name.lower()
     )
+    # Back goes after the matches, not before — Alfred selects the first
+    # returned item by default, so a leading Back item would hijack a
+    # type-then-Return pick of the top match (same issue caught in review
+    # for render_text_input(), below).
     if not matches:
-        return {"items": [_back_item(reminder_id), {
+        return {"items": [{
             "title": f'No list matches "{partial}"' if partial else "No lists found",
             "subtitle": "Keep typing, or check the name in Reminders.app",
             "valid": False,
-        }]}
+        }, _back_item(reminder_id)]}
     if confirm_enabled():
-        return {"items": [_back_item(reminder_id)] + [
+        return {"items": [
             {
                 "title": name,
                 "subtitle": "Tab to review before confirming",
@@ -577,8 +585,8 @@ def render_move_picker(reminder_id, partial):
                 **_icon_kwargs(),
             }
             for name in matches
-        ]}
-    return {"items": [_back_item(reminder_id)] + [
+        ] + [_back_item(reminder_id)]}
+    return {"items": [
         {
             "title": name,
             "subtitle": "Move here",
@@ -588,7 +596,7 @@ def render_move_picker(reminder_id, partial):
             **_icon_kwargs(),
         }
         for name in matches
-    ]}
+    ] + [_back_item(reminder_id)]}
 
 
 def render_confirm(action, reminder_id, value):
@@ -630,7 +638,12 @@ def render_text_input(reminder_id, action, typed_text, prompt_hint):
             "valid": bool(typed_text),
             "variables": {"action": action, "reminder_id": reminder_id},
         }
-    return {"items": [_back_item(reminder_id), item]}
+    # Back goes *after* the working item, not before — Alfred selects the
+    # first returned item by default, so if Back were first, pressing
+    # Return/Tab right after typing a value would activate Back instead of
+    # submitting/reviewing what was just typed (caught in review: this
+    # would have silently discarded typed input on every edit/reschedule).
+    return {"items": [item, _back_item(reminder_id)]}
 
 
 def main():
