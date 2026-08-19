@@ -37,18 +37,27 @@ REMINDERS_APP_PATHS = [
 ]
 
 
+def app_icon(*candidate_paths):
+    """Alfred `icon` dict borrowing the Finder icon of the first existing
+    path among `candidate_paths` — no bundled icon assets needed, and it
+    degrades gracefully (returns None, meaning Alfred's own default icon)
+    if none of the candidates exist on this machine, e.g. a third-party
+    app that isn't installed. Callers should omit the `icon` key entirely
+    when this returns None rather than passing None through to Alfred.
+    """
+    for path in candidate_paths:
+        if os.path.exists(path):
+            return {"type": "fileicon", "path": path}
+    return None
+
+
 def reminders_app_icon():
     """Alfred `icon` dict pointing at Reminders.app itself — used for any
     Script Filter result that represents *a list* (not a reminder), so
     list-picking rows read as "this is a list" at a glance without needing
-    a bundled icon asset. `fileicon` tells Alfred to render the same icon
-    Finder would show for that path. Returns None (no icon override,
-    Alfred's default) if Reminders.app isn't at either known location.
+    a bundled icon asset.
     """
-    for path in REMINDERS_APP_PATHS:
-        if os.path.isdir(path):
-            return {"type": "fileicon", "path": path}
-    return None
+    return app_icon(*REMINDERS_APP_PATHS)
 
 
 class RemctlError(RuntimeError):

@@ -8,6 +8,7 @@ list name picked, in list_reminders.py's menu/text-entry/picker modes).
 Clears the scope-fetch cache after any mutation so the next `rem`
 keystroke reflects the change immediately.
 """
+import datetime as dt
 import glob
 import os
 import re
@@ -32,12 +33,33 @@ def notify(title, subtitle):
     subprocess.run(["osascript", "-e", script], capture_output=True)
 
 
+def _due_for_bulk_reschedule(item, target):
+    """Only the *day* moves — a reminder due at 9am stays due at 9am, just
+    on `target` instead of whenever it was overdue from. An all-day
+    reminder (no specific time) stays all-day. remctl accepts "today
+    HH:MM" / "tomorrow HH:MM" directly (verified against `remctl add -d`),
+    so the original time is read straight off dueDate and reattached
+    rather than dropped — passing a bare "today"/"tomorrow" would silently
+    strip any existing time and turn a timed reminder into an all-day one.
+    """
+    if item.get("allDay"):
+        return target
+    due_iso = item.get("dueDate")
+    if not due_iso:
+        return target
+    try:
+        return f"{target} {dt.datetime.fromisoformat(due_iso).strftime('%H:%M')}"
+    except ValueError:
+        return target
+
+
 def bulk_reschedule_overdue(target):
     """Fetches the overdue set fresh at execution time (not whatever was
     overdue when the confirm screen rendered — the two can drift by
     however long the user took to read and confirm) and reschedules every
-    one of them to `target` ("today" or "tomorrow"). One reminder failing
-    doesn't stop the rest; failures are collected and reported together.
+    one of them to `target` ("today" or "tomorrow"), preserving each
+    reminder's own time of day. One reminder failing doesn't stop the
+    rest; failures are collected and reported together.
     """
     payload = run(["overdue"], json_output=True)
     items = items_from(payload)
@@ -50,7 +72,7 @@ def bulk_reschedule_overdue(target):
     for item in items:
         reminder_id = str(item.get("id"))
         try:
-            run(["edit", reminder_id, "-d", target], json_output=False)
+            run(["edit", reminder_id, "-d", _due_for_bulk_reschedule(item, target)], json_output=False)
             succeeded += 1
         except RemctlError as exc:
             failures.append(f'{item.get("title") or reminder_id}: {exc}')

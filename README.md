@@ -107,9 +107,16 @@ here. The set of reminders to reschedule is fetched fresh at the moment
 you confirm (not whatever was overdue when the screen first rendered), a
 macOS notification reports how many succeeded (and any failures, up to
 3 named), and one reminder failing doesn't stop the rest from being
-rescheduled. There's no way to hand-pick a subset — Alfred's results list
-has no multi-select, so it's genuinely all-or-nothing per invocation; use
-the normal per-reminder Reschedule… menu action for anything selective.
+rescheduled. Only the *day* moves — a reminder due at 9am stays due at
+9am, just on today/tomorrow instead of whenever it was overdue from (an
+all-day reminder stays all-day); passing a bare "today"/"tomorrow" to
+remctl would otherwise silently strip any existing time, so each
+reminder's original time of day is read off its own `dueDate` and
+reattached before rescheduling (`_due_for_bulk_reschedule()` in
+`scripts/reminder_action.py`). There's no way to hand-pick a subset —
+Alfred's results list has no multi-select, so it's genuinely
+all-or-nothing per invocation; use the normal per-reminder Reschedule…
+menu action for anything selective.
 
 **Changing what `rem` alone shows**: by default an empty query is "due
 today + overdue," which is legitimately empty whenever nothing's due or
@@ -133,8 +140,19 @@ Return) fills in the exact name and immediately shows that scope — no
 separate confirm step needed. Every row representing a list (this picker,
 "Move to another list…", and `remadd`'s `@` completion) shows
 Reminders.app's own icon (`reminders_app_icon()` in `scripts/_remctl.py`)
-so list rows read as "this is a list" at a glance — other row kinds
-(reminders, tags, actions) still use Alfred's default icon for now.
+so list rows read as "this is a list" at a glance. The action menu's own
+six rows are each visually distinct too (`MENU_ICONS` in
+`scripts/list_reminders.py`), borrowing icons from other installed apps
+rather than bundling custom assets — no icon-drawing tools involved, just
+`{"type": "fileicon", "path": "..."}` pointing at whatever app already
+has a matching Finder icon: Todoist for Mark as complete (fitting, since
+this workflow is itself modeled on Todoist's own Alfred workflow),
+Calendar for Reschedule, TextEdit for Change title, a generic macOS
+folder icon for Move to another list, System Information for View
+details, and Reminders.app itself for Open in Reminders.app. Each entry
+degrades to Alfred's default icon if the app it points at isn't
+installed (Todoist specifically, being third-party) — see `app_icon()`
+in `scripts/_remctl.py`.
 
 **Smart lists**: `remctl` can inspect a smart list's filter definition but
 has no command to fetch its live contents, so `@Name` tries a real list

@@ -86,6 +86,7 @@ from urllib.parse import quote, unquote
 
 from _remctl import (
     RemctlError,
+    app_icon,
     cached_run,
     fetch_known_tags,
     fetch_list_and_smart_list_names,
@@ -107,6 +108,30 @@ LIST_ICON = reminders_app_icon()
 
 def _icon_kwargs():
     return {"icon": LIST_ICON} if LIST_ICON else {}
+
+
+# One borrowed system-app icon per action-menu row, so the menu isn't a
+# wall of identical default icons — each keyed by the MENU_ACTIONS `action`
+# or `drill_prefix` (whichever is set), matched loosely by what the action
+# actually *is*: Todoist is the closest thing to a natural "mark complete"
+# checkmark on a stock Mac (fitting, since this workflow is itself modeled
+# on Todoist's own Alfred workflow), Calendar for scheduling, TextEdit for
+# retitling, a generic Finder folder for moving between lists, and System
+# Information's icon for "more info about this." Every entry degrades to
+# no icon (Alfred's default) if the app it points at isn't installed.
+MENU_ICONS = {
+    "done": app_icon("/Applications/Todoist.app"),
+    "due": app_icon("/System/Applications/Calendar.app"),
+    "edit": app_icon("/System/Applications/TextEdit.app"),
+    "movelist": {"type": "filetype", "path": "public.folder"},
+    "view": app_icon("/System/Applications/Utilities/System Information.app"),
+    "open": LIST_ICON,
+}
+
+
+def _menu_icon_kwargs(key):
+    icon = MENU_ICONS.get(key)
+    return {"icon": icon} if icon else {}
 
 
 def _encode_return(browse_query):
@@ -548,6 +573,7 @@ def render_menu(reminder_id, return_q=""):
                 "subtitle": f"“{title}” — review before confirming",
                 "valid": False,
                 "autocomplete": f"confirm:{action}:{reminder_id}:",
+                **_menu_icon_kwargs(action),
             })
         elif action:
             items.append({
@@ -560,6 +586,7 @@ def render_menu(reminder_id, return_q=""):
                     "reminder_id": reminder_id,
                     "reminder_title": title,
                 },
+                **_menu_icon_kwargs(action),
             })
         elif prefill_title is None:
             # View details is direct navigation, not a text-entry drill —
@@ -569,6 +596,7 @@ def render_menu(reminder_id, return_q=""):
                 "subtitle": f"“{title}” — {hint}",
                 "valid": False,
                 "autocomplete": f"{drill_prefix}:{reminder_id}:{return_q}",
+                **_menu_icon_kwargs(drill_prefix),
             })
         else:
             # Change-title prefills the current title so adding a #tag (or
@@ -581,6 +609,7 @@ def render_menu(reminder_id, return_q=""):
                 "subtitle": f"“{title}” — {hint}",
                 "valid": False,
                 "autocomplete": f"{drill_prefix}:{reminder_id}:{return_q}:{prefill}",
+                **_menu_icon_kwargs(drill_prefix),
             })
     # Back goes last, same reasoning as elsewhere: Alfred selects the first
     # returned item by default, so a leading Back item would hijack a
