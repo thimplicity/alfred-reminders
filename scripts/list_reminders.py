@@ -110,31 +110,56 @@ def _icon_kwargs():
     return {"icon": LIST_ICON} if LIST_ICON else {}
 
 
-# icons/mark_complete.png is a bundled asset, not borrowed from any
-# installed app — a plain green checkmark rendered once from Apple's own
-# SF Symbol "checkmark.circle.fill" (see the generation snippet in
-# README.md's Extending section), so "Mark as complete" isn't stuck
-# wearing a third-party app's brand logo just because that app happens to
-# have a checkmark-ish icon.
+# icons/*.png are bundled assets, not borrowed from any installed app —
+# each rendered once from an Apple SF Symbol (see the generation snippet
+# in README.md's Extending section) rather than reaching for whatever
+# third-party app happens to have a vaguely-matching icon (Mark as
+# complete went through two rejected rounds of exactly that: Todoist,
+# then TickTick, both "another app's icon" regardless of branding).
 _WORKFLOW_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MARK_COMPLETE_ICON = {"path": os.path.join(_WORKFLOW_ROOT, "icons", "mark_complete.png")}
+
+
+def _bundled_icon(filename):
+    return {"path": os.path.join(_WORKFLOW_ROOT, "icons", filename)}
+
+
+MARK_COMPLETE_ICON = _bundled_icon("mark_complete.png")
+PRIORITY_ICON = _bundled_icon("priority.png")
+FLAG_ICON = _bundled_icon("flag.png")
+TITLE_ICON = _bundled_icon("title.png")
+TAGS_ICON = _bundled_icon("tags.png")
+NOTES_ICON = _bundled_icon("notes.png")
+DUE_ICON = app_icon("/System/Applications/Calendar.app")
 
 # One icon per action-menu row, so the menu isn't a wall of identical
 # default icons — each keyed by the MENU_ACTIONS `action` or `drill_prefix`
-# (whichever is set). Aside from Mark as complete's bundled asset above,
-# the rest borrow other installed apps' Finder icons rather than bundling
-# more custom assets, matched loosely by what the action actually *is*:
-# Calendar for scheduling, TextEdit for retitling, a generic Finder folder
-# for moving between lists, and System Information's icon for "more info
-# about this." Those entries degrade to no icon (Alfred's default) if the
-# app they point at isn't installed.
+# (whichever is set). Beyond the bundled assets above, the rest borrow
+# other installed apps' Finder icons: TextEdit for retitling, a generic
+# Finder folder for moving between lists, and System Information's icon
+# for "more info about this." Those entries degrade to no icon (Alfred's
+# default) if the app they point at isn't installed.
 MENU_ICONS = {
     "done": MARK_COMPLETE_ICON,
-    "due": app_icon("/System/Applications/Calendar.app"),
+    "due": DUE_ICON,
     "edit": app_icon("/System/Applications/TextEdit.app"),
     "movelist": {"type": "filetype", "path": "public.folder"},
+    "priority": PRIORITY_ICON,
+    "flag": FLAG_ICON,
+    "unflag": FLAG_ICON,
     "view": app_icon("/System/Applications/Utilities/System Information.app"),
     "open": LIST_ICON,
+}
+
+# The same icons, reused on the read-only view:<id> detail lines, so e.g.
+# "Priority" looks the same whether you're looking at it or acting on it.
+VIEW_ICONS = {
+    "Title": TITLE_ICON,
+    "List": LIST_ICON,
+    "Due": DUE_ICON,
+    "Priority": PRIORITY_ICON,
+    "Flagged": FLAG_ICON,
+    "Tags": TAGS_ICON,
+    "Notes": NOTES_ICON,
 }
 
 
@@ -174,8 +199,9 @@ MENU_RE = re.compile(r"^menu:(\d+):(.*)$", re.DOTALL)
 EDIT_RE = re.compile(r"^edit:(\d+):([^:]*):(.*)$", re.DOTALL)
 DUE_RE = re.compile(r"^due:(\d+):([^:]*):(.*)$", re.DOTALL)
 MOVE_RE = re.compile(r"^movelist:(\d+):([^:]*):(.*)$", re.DOTALL)
+PRIORITY_RE = re.compile(r"^priority:(\d+):([^:]*):(.*)$", re.DOTALL)
 VIEW_RE = re.compile(r"^view:(\d+):(.*)$", re.DOTALL)
-CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|move):(\d+):(.*)$", re.DOTALL)
+CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|move|flag|unflag|priority):(\d+):(.*)$", re.DOTALL)
 
 
 def confirm_enabled():
@@ -543,14 +569,75 @@ def render_browse(query):
     return {"items": alfred_items}
 
 
-MENU_ACTIONS = [
+# Split into two lists (rather than one, with the flag toggle appended at
+# the end) purely so the flag toggle can be inserted between "Set
+# priority…" and "View details" in render_menu() — its label/action are
+# computed per-reminder (Flag vs Unflag) rather than fixed here, since a
+# static MENU_ACTIONS tuple has no way to know a specific reminder's
+# current flagged state at import time.
+MENU_ACTIONS_MAIN = [
     ("Mark as complete", "done", None, None, False, True),
     ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am", False, None),
     ("Change title…", None, "edit", "type a new title, or add #tag to tag it", True, None),
     ("Move to another list…", None, "movelist", "type or pick a list", False, None),
+    ("Set priority…", None, "priority", "pick none, low, medium, or high", False, None),
+]
+MENU_ACTIONS_TAIL = [
     ("View details", None, "view", "see notes, priority, flag, and tags", None, None),
     ("Open in Reminders.app", "open", None, None, False, False),
 ]
+
+
+def _menu_action_item(entry, reminder_id, return_q, title):
+    label, action, drill_prefix, hint, prefill_title, needs_confirm = entry
+    if action and needs_confirm and confirm_enabled():
+        # "Mark as complete" is the only menu entry that both mutates
+        # and fires with no further typing, so it's the only one that
+        # needs its own confirm drill-in here — edit/reschedule/move
+        # route through confirm from render_text_input()/
+        # render_move_picker() instead, once a value exists to show.
+        return {
+            "title": label,
+            "subtitle": f"“{title}” — review before confirming",
+            "valid": False,
+            "autocomplete": f"confirm:{action}:{reminder_id}:",
+            **_menu_icon_kwargs(action),
+        }
+    if action:
+        return {
+            "title": label,
+            "subtitle": f"“{title}”",
+            "arg": reminder_id,
+            "valid": True,
+            "variables": {
+                "action": action,
+                "reminder_id": reminder_id,
+                "reminder_title": title,
+            },
+            **_menu_icon_kwargs(action),
+        }
+    if prefill_title is None:
+        # View details is direct navigation, not a text-entry drill —
+        # no trailing ":text" slot to fill in.
+        return {
+            "title": label,
+            "subtitle": f"“{title}” — {hint}",
+            "valid": False,
+            "autocomplete": f"{drill_prefix}:{reminder_id}:{return_q}",
+            **_menu_icon_kwargs(drill_prefix),
+        }
+    # Change-title prefills the current title so adding a #tag (or a small
+    # tweak) doesn't require retyping the whole thing — reschedule/move/
+    # priority don't prefill, since a stale due date, list name, or
+    # priority isn't a useful starting point for any of them.
+    prefill = title if prefill_title else ""
+    return {
+        "title": label,
+        "subtitle": f"“{title}” — {hint}",
+        "valid": False,
+        "autocomplete": f"{drill_prefix}:{reminder_id}:{return_q}:{prefill}",
+        **_menu_icon_kwargs(drill_prefix),
+    }
 
 
 def render_menu(reminder_id, return_q=""):
@@ -569,57 +656,33 @@ def render_menu(reminder_id, return_q=""):
         return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
 
     title = info.get("title") or f"#{reminder_id}"
-    items = []
-    for label, action, drill_prefix, hint, prefill_title, needs_confirm in MENU_ACTIONS:
-        if action and needs_confirm and confirm_enabled():
-            # "Mark as complete" is the only menu entry that both mutates
-            # and fires with no further typing, so it's the only one that
-            # needs its own confirm drill-in here — edit/reschedule/move
-            # route through confirm from render_text_input()/
-            # render_move_picker() instead, once a value exists to show.
-            items.append({
-                "title": label,
-                "subtitle": f"“{title}” — review before confirming",
-                "valid": False,
-                "autocomplete": f"confirm:{action}:{reminder_id}:",
-                **_menu_icon_kwargs(action),
-            })
-        elif action:
-            items.append({
-                "title": label,
-                "subtitle": f"“{title}”",
-                "arg": reminder_id,
-                "valid": True,
-                "variables": {
-                    "action": action,
-                    "reminder_id": reminder_id,
-                    "reminder_title": title,
-                },
-                **_menu_icon_kwargs(action),
-            })
-        elif prefill_title is None:
-            # View details is direct navigation, not a text-entry drill —
-            # no trailing ":text" slot to fill in.
-            items.append({
-                "title": label,
-                "subtitle": f"“{title}” — {hint}",
-                "valid": False,
-                "autocomplete": f"{drill_prefix}:{reminder_id}:{return_q}",
-                **_menu_icon_kwargs(drill_prefix),
-            })
-        else:
-            # Change-title prefills the current title so adding a #tag (or
-            # a small tweak) doesn't require retyping the whole thing —
-            # reschedule/move don't prefill, since a stale due date or list
-            # name isn't a useful starting point for either.
-            prefill = title if prefill_title else ""
-            items.append({
-                "title": label,
-                "subtitle": f"“{title}” — {hint}",
-                "valid": False,
-                "autocomplete": f"{drill_prefix}:{reminder_id}:{return_q}:{prefill}",
-                **_menu_icon_kwargs(drill_prefix),
-            })
+    items = [_menu_action_item(entry, reminder_id, return_q, title) for entry in MENU_ACTIONS_MAIN]
+
+    # Flag/Unflag: same "action fires now, drilling into confirm first
+    # when enabled" shape as Mark as complete, just with the label and the
+    # actual action name depending on the reminder's current flagged
+    # state — flip a flagged reminder back off, not just always on.
+    flag_label, flag_action = ("Unflag", "unflag") if info.get("flagged") else ("Flag", "flag")
+    if confirm_enabled():
+        items.append({
+            "title": flag_label,
+            "subtitle": f"“{title}” — review before confirming",
+            "valid": False,
+            "autocomplete": f"confirm:{flag_action}:{reminder_id}:",
+            **_menu_icon_kwargs(flag_action),
+        })
+    else:
+        items.append({
+            "title": flag_label,
+            "subtitle": f"“{title}”",
+            "arg": reminder_id,
+            "valid": True,
+            "variables": {"action": flag_action, "reminder_id": reminder_id, "reminder_title": title},
+            **_menu_icon_kwargs(flag_action),
+        })
+
+    items += [_menu_action_item(entry, reminder_id, return_q, title) for entry in MENU_ACTIONS_TAIL]
+
     # Back goes last, same reasoning as elsewhere: Alfred selects the first
     # returned item by default, so a leading Back item would hijack a
     # quick Return meant for the top action (e.g. "Mark as complete" when
@@ -662,6 +725,7 @@ def render_view(reminder_id, return_q=""):
             "arg": reminder_id,
             "valid": True,
             "variables": dict(base_vars),
+            **({"icon": VIEW_ICONS[label]} if VIEW_ICONS.get(label) else {}),
         }
         for label, value in lines
     ]
@@ -716,6 +780,48 @@ def render_move_picker(reminder_id, return_q, partial):
     ] + [_back_item(reminder_id, return_q)]}
 
 
+PRIORITY_CHOICES = [("None", "none"), ("Low", "low"), ("Medium", "medium"), ("High", "high")]
+
+
+def render_priority_picker(reminder_id, return_q, partial):
+    """A fixed 4-choice picker rather than free-text entry — priority only
+    has these values, so typing one out (and risking a typo remctl would
+    just reject) buys nothing over picking from a short list. `partial`
+    still filters it live, same shape as the list/tag pickers, so typing
+    "h" narrows straight to High.
+    """
+    needle = partial.lower()
+    matches = [(label, value) for label, value in PRIORITY_CHOICES if needle in label.lower()]
+    if not matches:
+        return {"items": [{
+            "title": f'No priority matches "{partial}"',
+            "subtitle": "Try none, low, medium, or high",
+            "valid": False,
+        }, _back_item(reminder_id, return_q)]}
+    if confirm_enabled():
+        return {"items": [
+            {
+                "title": label,
+                "subtitle": "Tab to review before confirming",
+                "valid": False,
+                "autocomplete": f"confirm:priority:{reminder_id}:{value}",
+                **_menu_icon_kwargs("priority"),
+            }
+            for label, value in matches
+        ] + [_back_item(reminder_id, return_q)]}
+    return {"items": [
+        {
+            "title": label,
+            "subtitle": "Set this priority",
+            "arg": value,
+            "valid": True,
+            "variables": {"action": "priority", "reminder_id": reminder_id},
+            **_menu_icon_kwargs("priority"),
+        }
+        for label, value in matches
+    ] + [_back_item(reminder_id, return_q)]}
+
+
 def render_confirm(action, reminder_id, value):
     try:
         info = run(["info", reminder_id], json_output=True)
@@ -728,6 +834,9 @@ def render_confirm(action, reminder_id, value):
         "edit": f"Change “{title}”'s title to “{value}”",
         "reschedule": f"Reschedule “{title}” to “{value}”",
         "move": f"Move “{title}” to “{value}”",
+        "flag": f"Flag “{title}”",
+        "unflag": f"Unflag “{title}”",
+        "priority": f"Set “{title}”'s priority to {value}",
     }
     item = {
         "title": summary_by_action.get(action, f"{action} “{title}”"),
@@ -809,6 +918,12 @@ def main():
             print(json.dumps(render_move_picker(reminder_id, return_q, typed)))
         except RemctlError as exc:
             print(json.dumps({"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}))
+        return
+
+    priority_match = PRIORITY_RE.match(query)
+    if priority_match:
+        reminder_id, return_q, typed = priority_match.group(1), priority_match.group(2), priority_match.group(3)
+        print(json.dumps(render_priority_picker(reminder_id, return_q, typed)))
         return
 
     view_match = VIEW_RE.match(query)

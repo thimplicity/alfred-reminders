@@ -153,6 +153,22 @@ def main():
                 print("No list chosen — move cancelled.", file=sys.stderr)
                 sys.exit(1)
             run(["edit", reminder_id, "-l", typed_text], json_output=False)
+        elif action == "flag":
+            # `remctl flag <id>` (AppleScript UI automation) needs
+            # Reminders.app frontmost to respond at all — verified
+            # directly: it times out entirely when the app is merely
+            # running in the background, and only completes (in ~3.5s)
+            # once activated to the front. `edit --private --flagged` uses
+            # EventKit's private-metadata path instead, no app-frontmost
+            # dependency, and is reliably fast (~0.2s).
+            run(["edit", reminder_id, "--private", "--flagged"], json_output=False)
+        elif action == "unflag":
+            run(["edit", reminder_id, "--private", "--no-flagged"], json_output=False)
+        elif action == "priority":
+            if not typed_text:
+                print("No priority chosen — priority change cancelled.", file=sys.stderr)
+                sys.exit(1)
+            run(["edit", reminder_id, "-p", typed_text], json_output=False)
         else:
             print(f"Unknown action: {action}", file=sys.stderr)
             sys.exit(1)
