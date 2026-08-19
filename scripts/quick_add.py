@@ -20,21 +20,15 @@ query) to disambiguate. `notes:` works the same way and is never
 auto-detected, since free text can't be told apart from a due phrase by
 pattern alone.
 """
-import subprocess
 import sys
 
-from _remctl import RemctlError, normalize_date_phrase, run, split_implicit_due
+from _remctl import RemctlError, looks_like_due_token, normalize_date_phrase, notify, run, split_implicit_due
 
 PRIORITY_MAP = {
     "h": "high", "high": "high",
     "m": "medium", "medium": "medium",
     "l": "low", "low": "low",
 }
-
-
-def notify(title, subtitle):
-    script = f'display notification {subtitle!r} with title {title!r}'
-    subprocess.run(["osascript", "-e", script], capture_output=True)
 
 
 def parse(query):
@@ -57,12 +51,26 @@ def parse(query):
             mode = None
             priority = PRIORITY_MAP[low[1:]]
             continue
-        if low.startswith("due:") or (tok.startswith("/") and len(tok) > 1):
+        if low.startswith("due:"):
             mode = "due"
             explicit_due = True
-            rest = tok[4:] if low.startswith("due:") else tok[1:]
+            rest = tok[4:]
             if rest:
                 due_words.append(rest)
+            continue
+        # "/" is only recognized as the due-phrase marker when what
+        # follows actually looks date-like — otherwise a genuine leading
+        # slash in a title ("Check /health endpoint", a Unix path, a URL
+        # route) would get silently swallowed into the due phrase instead
+        # of staying part of the title, and the add would likely fail
+        # remctl's date parsing entirely instead of creating what was
+        # actually typed. Same token classifier the implicit auto-detect
+        # heuristic already uses, so "/" and unmarked auto-detection agree
+        # on what counts as date-like.
+        if tok.startswith("/") and len(tok) > 1 and looks_like_due_token(tok[1:]):
+            mode = "due"
+            explicit_due = True
+            due_words.append(tok[1:])
             continue
         if low.startswith("notes:"):
             mode = "notes"

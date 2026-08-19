@@ -12,10 +12,9 @@ import datetime as dt
 import glob
 import os
 import re
-import subprocess
 import sys
 
-from _remctl import CACHE_DIR, RemctlError, items_from, normalize_date_phrase, run
+from _remctl import CACHE_DIR, RemctlError, items_from, normalize_date_phrase, notify, run
 
 _TAG_TOKEN_RE = re.compile(r"(?:(?<=\s)|^)#(\S+) ?")
 
@@ -26,11 +25,6 @@ def clear_cache():
             os.remove(path)
         except OSError:
             pass
-
-
-def notify(title, subtitle):
-    script = f'display notification {subtitle!r} with title {title!r}'
-    subprocess.run(["osascript", "-e", script], capture_output=True)
 
 
 def _due_for_bulk_reschedule(item, target):

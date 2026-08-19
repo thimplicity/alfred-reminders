@@ -60,6 +60,28 @@ def reminders_app_icon():
     return app_icon(*REMINDERS_APP_PATHS)
 
 
+def _applescript_string(text):
+    """Escape and quote `text` as an AppleScript string literal.
+
+    AppleScript string literals are double-quoted, not single-quoted — the
+    previous version of this helper used Python's repr() (!r), which
+    produces Python-style single-quoted output. That's not merely
+    stylistically wrong: osascript rejects it outright (verified directly:
+    `osascript -e "display notification 'x' with title 'y'"` fails with
+    "syntax error: Expected ... but found unknown token"), so every
+    notify() call using it silently failed — the notification just never
+    appeared, with no visible error since the caller doesn't check
+    osascript's exit code. Double-quoted output only needs its own
+    backslashes and double quotes escaped.
+    """
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def notify(title, subtitle):
+    script = f"display notification {_applescript_string(subtitle)} with title {_applescript_string(title)}"
+    subprocess.run(["osascript", "-e", script], capture_output=True)
+
+
 class RemctlError(RuntimeError):
     def __init__(self, message, stderr=""):
         super().__init__(message)
