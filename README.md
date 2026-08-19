@@ -142,17 +142,21 @@ separate confirm step needed. Every row representing a list (this picker,
 Reminders.app's own icon (`reminders_app_icon()` in `scripts/_remctl.py`)
 so list rows read as "this is a list" at a glance. The action menu's own
 six rows are each visually distinct too (`MENU_ICONS` in
-`scripts/list_reminders.py`), borrowing icons from other installed apps
-rather than bundling custom assets — no icon-drawing tools involved, just
+`scripts/list_reminders.py`). Five of the six borrow another installed
+app's Finder icon rather than bundling a custom asset — just
 `{"type": "fileicon", "path": "..."}` pointing at whatever app already
-has a matching Finder icon: Todoist for Mark as complete (fitting, since
-this workflow is itself modeled on Todoist's own Alfred workflow),
-Calendar for Reschedule, TextEdit for Change title, a generic macOS
-folder icon for Move to another list, System Information for View
-details, and Reminders.app itself for Open in Reminders.app. Each entry
-degrades to Alfred's default icon if the app it points at isn't
-installed (Todoist specifically, being third-party) — see `app_icon()`
-in `scripts/_remctl.py`.
+has a matching icon: Calendar for Reschedule, TextEdit for Change title,
+a generic macOS folder icon for Move to another list, System Information
+for View details, and Reminders.app itself for Open in Reminders.app.
+Those degrade to Alfred's default icon if the app they point at isn't
+installed — see `app_icon()` in `scripts/_remctl.py`. **Mark as
+complete** is the one exception: deliberately *not* another app's brand
+logo (an earlier version borrowed Todoist's, then TickTick's, both
+rejected as "not another app's icon") — it's `icons/mark_complete.png`,
+a plain green checkmark rendered once from Apple's own SF Symbol
+`checkmark.circle.fill` and committed as a bundled asset (see
+"Extending" below for how it was generated, if it ever needs
+regenerating at a different size/color).
 
 **Smart lists**: `remctl` can inspect a smart list's filter definition but
 has no command to fetch its live contents, so `@Name` tries a real list
@@ -465,3 +469,26 @@ python3 quick_add_filter.py "Buy milk !h"                      # priority comple
   supports more filter kinds over time; unrecognized filter keys are
   currently ignored (treated as "always matches"), which can make a smart
   list look broader in Alfred than it does in Reminders.app.
+- **Regenerating `icons/mark_complete.png`** (or adding a new bundled
+  icon in the same style): rendered from Apple's own SF Symbols via
+  `osascript -l JavaScript`, no image-editing app or third-party app icon
+  involved — swap the symbol name, point size, or `NSColor` values below
+  to change it:
+  ```bash
+  osascript -l JavaScript -e '
+  ObjC.import("AppKit");
+  var green = $.NSColor.colorWithRedGreenBlueAlpha(0.20, 0.78, 0.35, 1.0);
+  var config = $.NSImageSymbolConfiguration.configurationWithPointSizeWeight(220, $.NSFontWeightRegular);
+  var colorConfig = $.NSImageSymbolConfiguration.configurationWithHierarchicalColor(green);
+  config = config.configurationByApplyingConfiguration(colorConfig);
+  var img = $.NSImage.imageWithSystemSymbolNameAccessibilityDescription("checkmark.circle.fill", $());
+  img = img.imageWithSymbolConfiguration(config);
+  img.setSize($.NSMakeSize(256, 256));
+  var rep = $.NSBitmapImageRep.imageRepWithData(img.TIFFRepresentation);
+  var pngData = rep.representationUsingTypeProperties(4, $());
+  pngData.writeToFileAtomically("icons/mark_complete.png", true);
+  '
+  ```
+  (`representationUsingTypeProperties`'s first argument is an
+  `NSBitmapImageFileType` raw value — `4` is PNG; `1`, easy to reach for
+  by mistake, is BMP.)

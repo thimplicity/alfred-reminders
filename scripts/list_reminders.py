@@ -110,17 +110,26 @@ def _icon_kwargs():
     return {"icon": LIST_ICON} if LIST_ICON else {}
 
 
-# One borrowed system-app icon per action-menu row, so the menu isn't a
-# wall of identical default icons — each keyed by the MENU_ACTIONS `action`
-# or `drill_prefix` (whichever is set), matched loosely by what the action
-# actually *is*: Todoist is the closest thing to a natural "mark complete"
-# checkmark on a stock Mac (fitting, since this workflow is itself modeled
-# on Todoist's own Alfred workflow), Calendar for scheduling, TextEdit for
-# retitling, a generic Finder folder for moving between lists, and System
-# Information's icon for "more info about this." Every entry degrades to
-# no icon (Alfred's default) if the app it points at isn't installed.
+# icons/mark_complete.png is a bundled asset, not borrowed from any
+# installed app — a plain green checkmark rendered once from Apple's own
+# SF Symbol "checkmark.circle.fill" (see the generation snippet in
+# README.md's Extending section), so "Mark as complete" isn't stuck
+# wearing a third-party app's brand logo just because that app happens to
+# have a checkmark-ish icon.
+_WORKFLOW_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MARK_COMPLETE_ICON = {"path": os.path.join(_WORKFLOW_ROOT, "icons", "mark_complete.png")}
+
+# One icon per action-menu row, so the menu isn't a wall of identical
+# default icons — each keyed by the MENU_ACTIONS `action` or `drill_prefix`
+# (whichever is set). Aside from Mark as complete's bundled asset above,
+# the rest borrow other installed apps' Finder icons rather than bundling
+# more custom assets, matched loosely by what the action actually *is*:
+# Calendar for scheduling, TextEdit for retitling, a generic Finder folder
+# for moving between lists, and System Information's icon for "more info
+# about this." Those entries degrade to no icon (Alfred's default) if the
+# app they point at isn't installed.
 MENU_ICONS = {
-    "done": app_icon("/Applications/Todoist.app"),
+    "done": MARK_COMPLETE_ICON,
     "due": app_icon("/System/Applications/Calendar.app"),
     "edit": app_icon("/System/Applications/TextEdit.app"),
     "movelist": {"type": "filetype", "path": "public.folder"},
