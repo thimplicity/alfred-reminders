@@ -3,10 +3,10 @@
 
 Reads `action` and `reminder_id` from the environment (set as Alfred
 workflow variables by the triggering item/mod) and `{query}` as argv[1],
-which is only meaningful for edit/reschedule/priority (the text typed, or
-the priority picked, in list_reminders.py's menu/text-entry/picker
-modes). Clears the scope-fetch cache after any mutation so the next `rem`
-keystroke reflects the change immediately.
+which is only meaningful for edit/reschedule/priority/quickedit (the text
+typed, or the priority picked, in list_reminders.py's menu/text-entry/
+picker modes). Clears the scope-fetch cache after any mutation so the
+next `rem` keystroke reflects the change immediately.
 """
 import datetime as dt
 import glob
@@ -15,6 +15,7 @@ import re
 import sys
 
 from _remctl import CACHE_DIR, RemctlError, items_from, normalize_date_phrase, notify, run
+from quick_add import parse as parse_quick_add
 
 _TAG_TOKEN_RE = re.compile(r"(?:(?<=\s)|^)#(\S+) ?")
 
@@ -82,6 +83,32 @@ def bulk_reschedule_overdue(target):
     else:
         plural = "s" if succeeded != 1 else ""
         notify("Reminders", f"Rescheduled {succeeded} overdue reminder{plural} to {target}")
+
+
+def execute_quick_edit(reminder_id, typed_text):
+    """Applies title/tags/priority/due/notes together from one line of
+    remadd-style syntax, in a single `remctl edit` call. A marker's
+    absence means that field is explicitly cleared (`-d clear`, `-p
+    none`, `--clear-tags`, `-n ""`), not left alone — see
+    render_quick_edit()'s docstring in list_reminders.py for why that's
+    safe: the line starts pre-filled with the current state, so an
+    absent marker here means it was deliberately deleted on screen.
+    """
+    parsed = parse_quick_add(typed_text)
+    if not parsed["title"]:
+        print("No title — quick edit cancelled.", file=sys.stderr)
+        sys.exit(1)
+
+    args = [
+        "edit", reminder_id,
+        "--title", parsed["title"],
+        "-d", normalize_date_phrase(parsed["due"]) if parsed["due"] else "clear",
+        "-p", parsed["priority"] or "none",
+        "-n", parsed["notes"] or "",
+        "--private",
+    ]
+    args += ["--set-tags", ",".join(parsed["tags"])] if parsed["tags"] else ["--clear-tags"]
+    run(args, json_output=False)
 
 
 def extract_tags(text):
@@ -164,6 +191,11 @@ def main():
                 print("No priority chosen — priority change cancelled.", file=sys.stderr)
                 sys.exit(1)
             run(["edit", reminder_id, "-p", typed_text], json_output=False)
+        elif action == "quickedit":
+            if not typed_text:
+                print("Nothing typed — quick edit cancelled.", file=sys.stderr)
+                sys.exit(1)
+            execute_quick_edit(reminder_id, typed_text)
         else:
             print(f"Unknown action: {action}", file=sys.stderr)
             sys.exit(1)
