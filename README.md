@@ -94,8 +94,20 @@ structure" below; the scripts themselves don't change.
 | `rem all <text>` | Same, filtered by `<text>` |
 | `rem upcoming [N]` | Due within N days (default 7) |
 | `rem flagged` | Flagged reminders |
-| `rem overdue` | Overdue only |
+| `rem overdue` | Overdue only — including reminders due **earlier today** (see below) |
 | `rem overdue today` / `rem overdue tomorrow` | **Bulk reschedule** every overdue reminder to today/tomorrow in one shot |
+
+**What counts as overdue**: not `remctl overdue`, which means "dated
+before today" — a whole-day comparison, so a reminder due at 9am isn't
+overdue to it at 5pm the same day. This workflow compares against the
+actual clock (`is_past_due()` in `scripts/_remctl.py`), merging remctl's
+`overdue` and `today` scopes and filtering both. An all-day reminder is
+only overdue once the *day* is over, since one due all-day today is still
+due today at 11pm. Without this there's a genuinely confusing dead end:
+after a bulk "reschedule overdue to today", every reminder lands on today
+at its original (already past) time, so they look overdue in the list
+while `rem overdue` reports none and the bulk action that would fix them
+refuses to run.
 
 **Bulk rescheduling overdue reminders**: `rem overdue today` (or
 `tomorrow`) doesn't browse — it's a single confirm-style row, "Reschedule
@@ -109,7 +121,11 @@ macOS notification reports how many succeeded (and any failures, up to
 3 named), and one reminder failing doesn't stop the rest from being
 rescheduled. Only the *day* moves — a reminder due at 9am stays due at
 9am, just on today/tomorrow instead of whenever it was overdue from (an
-all-day reminder stays all-day); passing a bare "today"/"tomorrow" to
+all-day reminder stays all-day) — which is exactly why `rem overdue
+today` warns you when it won't help: for a reminder due 9am this morning,
+"today" still means 9am today, so it lands right back in the past. The
+confirm row says how many of the N would stay overdue and points at `rem
+overdue tomorrow` instead. Passing a bare "today"/"tomorrow" to
 remctl would otherwise silently strip any existing time, so each
 reminder's original time of day is read off its own `dueDate` and
 reattached before rescheduling (`_due_for_bulk_reschedule()` in

@@ -229,6 +229,73 @@ class TodayRescheduleEligibility(unittest.TestCase):
         self.assertTrue(today_reschedule_makes_sense({"dueDate": 1755, "allDay": False}))
 
 
+class PastDue(unittest.TestCase):
+    """`remctl overdue` means "dated before today", so a reminder due at
+    9am is not overdue to it at 5pm the same day. is_past_due() uses the
+    clock for timed reminders and the calendar day for all-day ones.
+    """
+
+    NOW = dt.datetime(2026, 8, 20, 13, 0)
+
+    def _past(self, due, all_day=False, completed=False):
+        return _remctl.is_past_due(
+            {"dueDate": due, "allDay": all_day, "completed": completed}, self.NOW
+        )
+
+    def test_earlier_today_is_overdue(self):
+        self.assertTrue(self._past("2026-08-20T09:00:00"))
+
+    def test_later_today_is_not(self):
+        self.assertFalse(self._past("2026-08-20T17:00:00"))
+
+    def test_previous_day_is_overdue(self):
+        self.assertTrue(self._past("2026-08-19T23:00:00"))
+
+    def test_all_day_today_is_not_overdue(self):
+        # Due all-day today is still due today at 11pm, not overdue since
+        # midnight — the reason the count is 11 and not 12 on a list where
+        # one all-day reminder falls on today.
+        self.assertFalse(self._past("2026-08-20T00:00:00", all_day=True))
+
+    def test_all_day_yesterday_is_overdue(self):
+        self.assertTrue(self._past("2026-08-19T00:00:00", all_day=True))
+
+    def test_completed_never_overdue(self):
+        self.assertFalse(self._past("2026-08-19T09:00:00", completed=True))
+
+    def test_no_or_bad_due_never_overdue(self):
+        self.assertFalse(self._past(None))
+        self.assertFalse(self._past("not-a-date"))
+        self.assertFalse(self._past(1755))
+
+    def test_fetch_merges_overdue_and_today_scopes(self):
+        # The whole point: `remctl overdue` can legitimately return
+        # nothing while reminders sit visibly past due in `today`.
+        today_payload = [
+            {"id": 1, "dueDate": "2026-08-20T09:00:00", "allDay": False},   # past
+            {"id": 2, "dueDate": "2026-08-20T23:00:00", "allDay": False},   # future
+            {"id": 3, "dueDate": "2026-08-20T00:00:00", "allDay": True},    # all-day today
+        ]
+        with mock.patch.object(_remctl, "cached_run",
+                               lambda key, args, **kw: [] if args == ["overdue"] else today_payload):
+            with mock.patch.object(_remctl.dt, "datetime", FrozenDatetime):
+                FrozenDatetime.frozen = self.NOW
+                self.addCleanup(setattr, FrozenDatetime, "frozen",
+                                dt.datetime(2026, 8, 20, 12, 0, 0))
+                got = _remctl.fetch_overdue_items()
+        self.assertEqual([i["id"] for i in got], [1])
+
+    def test_fetch_deduplicates_across_scopes(self):
+        same = {"id": 7, "dueDate": "2026-08-20T09:00:00", "allDay": False}
+        with mock.patch.object(_remctl, "cached_run", lambda key, args, **kw: [dict(same)]):
+            with mock.patch.object(_remctl.dt, "datetime", FrozenDatetime):
+                FrozenDatetime.frozen = self.NOW
+                self.addCleanup(setattr, FrozenDatetime, "frozen",
+                                dt.datetime(2026, 8, 20, 12, 0, 0))
+                got = _remctl.fetch_overdue_items()
+        self.assertEqual(len(got), 1)
+
+
 class DatePhrases(unittest.TestCase):
     def test_out_of_range_times_raise(self):
         # Not merely dropped: falling through to date-only would succeed

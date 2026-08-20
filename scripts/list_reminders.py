@@ -104,6 +104,7 @@ from _remctl import (
     cached_run,
     fetch_known_tags,
     fetch_list_and_smart_list_names,
+    fetch_overdue_items,
     flatten_lists,
     items_from,
     matches_smart_list,
@@ -424,8 +425,9 @@ def fetch_scope(query_tokens):
         return items_from(payload), " ".join(query_tokens[1:]), False
 
     if first == "overdue":
-        payload = cached_run("scope:overdue", ["overdue"], ttl=CACHE_TTL)
-        return items_from(payload), " ".join(query_tokens[1:]), False
+        # Not plain `remctl overdue` — that means "dated before today" and
+        # so misses anything due earlier *today*. See fetch_overdue_items().
+        return fetch_overdue_items(), " ".join(query_tokens[1:]), False
 
     # No recognized scope keyword: treat the whole query as a full-text
     # search term. remctl does the searching remotely (title + notes,
@@ -543,19 +545,35 @@ def render_bulk_reschedule_confirm(target):
     letting that variable silently skip review here.
     """
     try:
-        payload = cached_run("scope:overdue", ["overdue"], ttl=CACHE_TTL)
+        items = fetch_overdue_items()
     except RemctlError as exc:
         return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
-    count = len(items_from(payload))
+    count = len(items)
     if count == 0:
         return {"items": [{
             "title": "No overdue reminders",
             "subtitle": "Nothing to reschedule",
             "valid": False,
         }]}
+
+    # Rescheduling to "today" keeps each reminder's own time of day, so
+    # anything whose time has already gone by lands back in the past and
+    # stays overdue. That's the single most confusing thing this action
+    # can do — it reports success while the list looks unchanged — so say
+    # up front how many it won't actually rescue, and point at the option
+    # that does. Same predicate the single-reminder picker uses to hide
+    # its own "Today" row.
+    note = "↩ to confirm, or backspace the query to cancel"
+    if target == "today":
+        stuck = sum(1 for i in items if not today_reschedule_makes_sense(i))
+        if stuck:
+            note = (
+                f"{stuck} of {count} would stay overdue (their time today has passed) "
+                "— use “rem overdue tomorrow” instead"
+            )
     return {"items": [{
         "title": f"Reschedule all {count} overdue reminder{'s' if count != 1 else ''} to {target}",
-        "subtitle": "↩ to confirm, or backspace the query to cancel",
+        "subtitle": note,
         "arg": target,
         "valid": True,
         "variables": {"action": "bulk_reschedule_overdue", "target": target},
