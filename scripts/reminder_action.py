@@ -94,7 +94,11 @@ def execute_quick_edit(reminder_id, typed_text):
     safe: the line starts pre-filled with the current state, so an
     absent marker here means it was deliberately deleted on screen.
     """
-    parsed = parse_quick_add(typed_text)
+    # auto_detect_due=False must match render_quick_edit()'s preview in
+    # list_reminders.py — otherwise what the confirm step showed and what
+    # actually gets applied could disagree. See that function's comment
+    # for why implicit due-detection is unsafe here.
+    parsed = parse_quick_add(typed_text, auto_detect_due=False)
     if not parsed["title"]:
         print("No title — quick edit cancelled.", file=sys.stderr)
         sys.exit(1)

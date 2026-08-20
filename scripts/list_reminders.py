@@ -857,7 +857,14 @@ def render_quick_edit(reminder_id, return_q, typed_text):
     (`-d clear`, `-p none`, `--clear-tags`, `-n ""`) whatever's missing
     rather than omitting flags that would leave old values untouched.
     """
-    parsed = parse_quick_add(typed_text)
+    # auto_detect_due=False: this text starts as an *existing* title
+    # (from _quick_edit_prefill()), not fresh input — remadd's implicit
+    # due-phrase heuristic would silently reinterpret a title ending in a
+    # day-like word ("Review on Monday") as title="Review" due="on
+    # Monday" on every confirm, even when only some other field was being
+    # changed. Only an explicit /phrase or due: marker sets a due date
+    # here. See parse()'s docstring in quick_add.py.
+    parsed = parse_quick_add(typed_text, auto_detect_due=False)
 
     # Same "always show all the slots" treatment as remadd's own preview,
     # minus @list (not part of this screen's scope) — a slot switches
