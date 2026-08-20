@@ -61,7 +61,7 @@ There's no delete — that's deliberate. Use Reminders.app if you need it.
 
 ### Quick edit
 
-The one worth knowing about. **Quick edit…** puts the whole reminder on a
+This puts the whole reminder on a
 single editable line, pre-filled with its current state:
 
 ```
@@ -90,7 +90,7 @@ remadd Pay rent /2026-06-01 notes:autopay is off this month
 | `!high` `!medium` `!low` | Priority (`!h` `!m` `!l` work too) |
 | `notes:…` | The notes — but stops at the next `@`, `#`, `!` or date marker (see below) |
 
-**The due date needs no marker at all.** A trailing date phrase is
+**The due date needs no marker** A trailing date phrase is
 detected automatically: `tomorrow`, `tom`, `next friday`, `9am`,
 `2026-06-01`, `+3d`, `9/13`, `sep 9`, even glued forms like `tom9am` or
 `sep9`. If a title genuinely ends in something date-like and gets
