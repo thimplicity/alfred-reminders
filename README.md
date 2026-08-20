@@ -1,7 +1,7 @@
 # Reminders — Alfred workflow
 
 Create, search, complete, and edit Apple Reminders from Alfred, backed by
-[remctl](https://github.com/viticci/remctl). Modeled on the UX of
+[remctl](https://github.com/viticci/remctl). Inspired by the UX of
 [Alfredo](https://alfred.app/workflows/giovanni/alfredo/) for Todoist.
 
 ## Status
