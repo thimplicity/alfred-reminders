@@ -166,19 +166,9 @@ All optional, in the workflow's configuration sheet:
 
 ## Limitations
 
-**No "move to another list."** It was built, but `remctl`'s underlying
-move fails with an EventKit error (`-3002`) on at least one machine,
-reproducibly and independently of this workflow. A clone-into-the-new-list-then-delete
-workaround works for most fields but loses subtasks,
-recurrence, URLs and section placement, and gives the reminder a new
-identity — not a good trade for a "move," so the feature was removed
-rather than shipped broken.
+**No "move to another list."** Seems to be a limitation with remctl
 
-**Quick edit won't touch a multi-line note.** It's a single-line editor, and
-a newline can't survive the round trip — an earlier version silently
-flattened a 7-line note into one line. Now it leaves multi-line notes
-strictly alone and says so on screen. Title, tags, priority and due date
-still edit normally; use Reminders.app to edit the note itself.
+**Quick edit won't touch a multi-line note.** It's a single-line editor, and a newline can't survive
 
 **Smart lists are approximated.** remctl can read a smart list's *rules*
 but not its contents, so the filter (tags, dates, priority, flagged) is
