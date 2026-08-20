@@ -47,8 +47,9 @@ Press <kbd>↩</kbd> or <kbd>⇥</kbd> on any reminder to open its action menu:
 | **View details** | Everything about the reminder, read-only |
 | **Open in Reminders.app** | |
 
-Every screen has a **← Back** row, and Back from the action menu returns
-you to *the exact search you came from*, not a blank `rem`.
+Every screen has a **← Back** row except the final confirmation
+(backspace to cancel that one), and Back from the action menu returns you
+to *the exact search you came from*, not a blank `rem`.
 
 There's no delete — that's deliberate. Use Reminders.app if you need it.
 
@@ -81,7 +82,7 @@ remadd Pay rent /2026-06-01 notes:autopay is off this month
 | `@List` | Which list (single-word names only) |
 | `#tag` | Repeatable — but see Limitations: on `remadd` these stay literal text |
 | `!high` `!medium` `!low` | Priority (`!h` `!m` `!l` work too) |
-| `notes:…` | Everything after it becomes the notes |
+| `notes:…` | The notes — but stops at the next `@`, `#`, `!` or date marker (see below) |
 
 **The due date needs no marker at all.** A trailing date phrase is
 detected automatically: `tomorrow`, `tom`, `next friday`, `9am`,
@@ -89,6 +90,15 @@ detected automatically: `tomorrow`, `tom`, `next friday`, `9am`,
 `sep9`. If a title genuinely ends in something date-like and gets
 misread, put `/` in front of the real date to force it —
 `remadd Review the Monday numbers /friday`.
+
+**`notes:` stops early if a marker follows it.** `notes:` runs to the end
+of what you type *unless* it hits another `@List`, `#tag`, `!priority` or
+date marker — those still register, and any plain words after them go
+back to the **title**, not the notes. So
+`remadd Buy milk notes:ask about !high volume orders` gives you a title of
+"Buy milk volume orders", notes of "ask about", and high priority. If your
+note needs one of those characters, put `notes:` last, or add the note in
+Reminders.app.
 
 `@`, `#` and `!` all complete as you type, and the subtitle previews
 exactly how your text is being interpreted before you commit.
@@ -121,14 +131,22 @@ cd remctl
 
 `remctl doctor` will tell you if anything's missing.
 
-**2. Grant Alfred access to Reminders.** Run `rem` once and approve the
-prompt. If you don't see one, add Alfred manually under **System Settings
-→ Privacy & Security → Reminders**.
+**2. Import the workflow.**
 
-This trips people up: the permission belongs to **Alfred.app itself**, not
-to Terminal. remctl working in your shell doesn't mean Alfred can use it.
+**3. Grant permissions — to Alfred, not to Terminal.** This is the step
+that trips people up. The grants are per-*process*, so remctl working in
+your shell says nothing about whether Alfred can use it. You need two:
 
-**3. Import the workflow** and you're done.
+- **Reminders access** — trigger `rem` once and approve the macOS prompt.
+  If it doesn't appear, add Alfred under **System Settings → Privacy &
+  Security → Reminders**.
+- **Full Disk Access** — under **System Settings → Privacy & Security →
+  Full Disk Access**, add **Alfred** *and* `/usr/bin/python3` (the
+  interpreter Alfred runs these scripts with).
+
+Run `remctl doctor` afterwards to confirm both checks pass. Skipping the
+Full Disk Access grant is the usual reason everything works in Terminal
+and nothing works in Alfred.
 
 ## Configuration
 
@@ -166,7 +184,9 @@ map to real commands and are exact. Unusual custom filters may not match
 Reminders.app perfectly.
 
 **`@List` in `remadd` is single-word only.** `@Work` is fine, `@Home
-Projects` isn't. Add it from `rem` or Reminders.app instead.
+Projects` isn't — the parser can't tell where a multi-word name ends.
+Add it in Reminders.app, or with `remctl add "Title" -l "Home Projects"`.
+(`rem` only browses and edits; it can't create.)
 
 **`#tags` behave differently in `remadd` than everywhere else.** Adding a
 reminder with `remadd Buy milk #errand` leaves `#errand` as literal text
