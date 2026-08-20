@@ -30,9 +30,19 @@ contain "@alice" or "#release" as ordinary words) without those getting
 silently reinterpreted as new metadata on the next confirm. See
 escape_literal().
 """
+import re
 import sys
 
 from _remctl import RemctlError, looks_like_due_token, normalize_date_phrase, notify, run, split_implicit_due
+
+# Any run of whitespace — space(s), a tab, a newline — counts as one
+# boundary; splitting with a capturing group keeps the separator text
+# itself in the result, so "".join(...) on an unmodified split reproduces
+# the input exactly. escape_literal() needs this (not just literal-space
+# splitting) so a marker-shaped word separated from prior text only by a
+# newline — a later line of a multi-line note — still gets detected and
+# escaped, before Alfred flattens that newline into a space on its own.
+_WS_RE = re.compile(r"(\s+)")
 
 PRIORITY_MAP = {
     "h": "high", "high": "high",
@@ -88,18 +98,18 @@ def escape_literal(text):
     words that would actually be misread get a backslash — a title with
     none of them round-trips with no visible change.
 
-    Splits on literal single spaces rather than `str.split()`'s default
-    (which treats any run of whitespace as one delimiter) so that repeated
-    spaces in the original text survive: a run of N spaces becomes N-1
-    empty-string "words" between real ones, each safely non-marker
-    (`_is_marker_token("")` is False), and `" ".join(...)` reconstructs
-    exactly the same run of spaces on the way back out. `parse()` uses the
-    same split/join approach for the same reason — see its docstring.
+    Splits on whitespace runs via `_WS_RE`, capturing each separator
+    (spaces, tabs, newlines) verbatim rather than reducing it to a fixed
+    delimiter, so the original spacing — including a marker-shaped word
+    that starts a later line of a multi-line note — survives exactly.
+    `_is_marker_token()` is always False for a whitespace-only or empty
+    string, so separator segments just pass through `"".join(...)`
+    unchanged alongside the (possibly escaped) word segments.
     """
-    return " ".join(("\\" + w if _is_marker_token(w) else w) for w in text.split(" "))
+    return "".join(("\\" + w if _is_marker_token(w) else w) for w in _WS_RE.split(text))
 
 
-def parse(query, auto_detect_due=True, recognize_list=True):
+def parse(query, auto_detect_due=True, recognize_list=True, preserve_boundary_whitespace=False):
     """`auto_detect_due=False` disables the trailing-due-phrase heuristic
     entirely (only an explicit `/phrase` or `due:phrase` marker sets a due
     date) — used by list_reminders.py's Quick edit… screen, which
@@ -133,9 +143,23 @@ def parse(query, auto_detect_due=True, recognize_list=True):
     just falls through to whichever accumulator is active), and the final
     `" ".join(...)` calls below reproduce the original spacing exactly.
     Verified: 'Buy  milk   at store' round-trips as 'Buy  milk   at store',
-    not 'Buy milk at store'.
+    not 'Buy milk at store'. (Newlines don't need the same treatment here:
+    by the time Quick edit's prefill reaches this function, Alfred has
+    already flattened any newline in the query into a space — it's only
+    escape_literal(), building that prefill *before* Alfred sees it, that
+    needs whitespace-run-aware splitting to catch a marker on a later
+    line; see its docstring.)
+
+    `preserve_boundary_whitespace=True` skips the final `.strip()` on
+    title/due/notes — used by Quick edit…, where an *existing* note can
+    legitimately start or end with whitespace (an indented first line),
+    and confirming some unrelated field shouldn't silently trim it away.
+    remadd leaves this off (the default): its title is fresh typed input,
+    where accidental leading/trailing spaces are just typos worth
+    cleaning up, not data worth preserving.
     """
     plain_tokens, due_words, notes_words, tags = [], [], [], []
+    plain_escaped = []  # parallel to plain_tokens: True if from a \escape
     list_name = priority = None
     mode = None  # None | 'due' | 'notes'
     explicit_due = False
@@ -153,6 +177,7 @@ def parse(query, auto_detect_due=True, recognize_list=True):
                 notes_words.append(literal)
             else:
                 plain_tokens.append(literal)
+                plain_escaped.append(True)
             continue
         low = tok.lower()
         if recognize_list and tok.startswith("@") and len(tok) > 1:
@@ -200,32 +225,61 @@ def parse(query, auto_detect_due=True, recognize_list=True):
             notes_words.append(tok)
         else:
             plain_tokens.append(tok)
+            plain_escaped.append(False)
 
     if auto_detect_due and not explicit_due and plain_tokens:
         # split_implicit_due() scans from the tail looking for a date-like
-        # anchor and stops as soon as a token doesn't look date-like — an
-        # empty-string separator token (see the split(" ") note above)
-        # isn't date-like either, so it would stop the scan right there
-        # and hide any real due phrase behind it. This path is remadd-only
-        # (auto_detect_due is False for Quick edit…), where the title is
-        # fresh typed input rather than existing text being round-tripped,
-        # so there's no whitespace-fidelity requirement to preserve here —
-        # filtering blank tokens out before the scan, and using the
-        # (already single-spaced) result directly, is safe. Matters in
-        # practice because quick_add_filter.py's own completions append a
-        # trailing space after the picked word.
-        non_blank = [t for t in plain_tokens if t]
-        non_blank, implicit_due = split_implicit_due(non_blank)
+        # anchor and stops as soon as a token doesn't look date-like. Two
+        # kinds of token need to be kept out of that scan entirely rather
+        # than just stopping it:
+        #   - an empty-string separator token (see the split(" ") note
+        #     above) isn't date-like either, so it would stop the scan
+        #     right there and hide any real due phrase behind it —
+        #     matters in practice because quick_add_filter.py's own
+        #     completions append a trailing space after the picked word.
+        #   - a token that came from a \escape (see escape_literal()) is
+        #     explicitly promised to "never [be] read... no matter its
+        #     shape" — but that promise was only ever kept against the
+        #     per-token marker checks above, not against this separate,
+        #     later heuristic scan, so an escaped date-like word ("Review
+        #     \Monday") still got silently swept into the due phrase.
+        # Escaped tokens are protected by walling them (and everything
+        # before them) off from the scan entirely — the scan only ever
+        # looks at the tail *after* the last escaped token, so an escaped
+        # word can never end up inside a detected due phrase, same as if
+        # it were a genuinely non-date-like word the scan had stopped at.
+        # This path is remadd-only (auto_detect_due is False for Quick
+        # edit…, where escaping instead exists to protect *pre-filled*
+        # existing text, and this heuristic never runs at all).
+        last_escaped = -1
+        for i, esc in enumerate(plain_escaped):
+            if esc:
+                last_escaped = i
+        protected = plain_tokens[: last_escaped + 1]
+        candidate = [t for t in plain_tokens[last_escaped + 1 :] if t]
+        candidate, implicit_due = split_implicit_due(candidate)
         due_words = implicit_due + due_words
-        plain_tokens = non_blank
+        plain_tokens = protected + candidate
+
+    title = " ".join(plain_tokens)
+    notes = " ".join(notes_words)
+    if not preserve_boundary_whitespace:
+        title = title.strip()
+        notes = notes.strip()
+    # A due phrase is never legitimately boundary-padded (Quick edit's own
+    # prefill always builds it from a clean ISO date, see _due_prefill()),
+    # so it's always stripped before handing it to normalize_date_phrase()
+    # regardless of preserve_boundary_whitespace — untested, unneeded
+    # territory for that function otherwise.
+    due = normalize_date_phrase(" ".join(due_words).strip())
 
     return {
-        "title": " ".join(plain_tokens).strip(),
+        "title": title,
         "list": list_name,
         "tags": tags,
         "priority": priority,
-        "due": normalize_date_phrase(" ".join(due_words).strip()) or None,
-        "notes": " ".join(notes_words).strip() or None,
+        "due": due or None,
+        "notes": notes or None,
     }
 
 
