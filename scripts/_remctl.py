@@ -564,19 +564,30 @@ def normalize_date_phrase(text):
         m = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?(am|pm)?", low)
         if m and (m.group(3) or m.group(2)):
             hour, minute, meridiem = int(m.group(1)), int(m.group(2) or 0), m.group(3)
-            if meridiem == "pm" and hour != 12:
-                hour += 12
-            elif meridiem == "am" and hour == 12:
-                hour = 0
             # The regex only bounds digit *count*, not range, so "25:00",
-            # "0:70" and "13pm" (-> 25:00) all match. Handing those to
+            # "0:70", "13am" and "0pm" all match it. Handing those to
             # remctl gets an obscure failure; silently dropping the time
             # and falling through to date-only is worse still, because the
             # add/reschedule then *succeeds* as an all-day reminder while
             # the confirmation screen showed the time the user typed. Both
             # quietly do something other than what was asked, so refuse
             # outright and let the caller surface it.
-            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            #
+            # Range-check *before* the meridiem conversion, not just
+            # after: a 12-hour clock only has hours 1-12, and validating
+            # the converted value lets nonsense through because it lands
+            # back inside 0-23 — "13am" stays 13 and saves as 1pm, "0pm"
+            # becomes 12 and saves as noon. Neither is what was typed.
+            if minute > 59:
+                raise InvalidDatePhrase(f"“{w}” isn't a valid time of day.")
+            if meridiem:
+                if not 1 <= hour <= 12:
+                    raise InvalidDatePhrase(f"“{w}” isn't a valid time of day.")
+                if meridiem == "pm" and hour != 12:
+                    hour += 12
+                elif meridiem == "am" and hour == 12:
+                    hour = 0
+            elif hour > 23:
                 raise InvalidDatePhrase(f"“{w}” isn't a valid time of day.")
             time_24h = f"{hour:02d}:{minute:02d}"
             break

@@ -237,6 +237,22 @@ class DatePhrases(unittest.TestCase):
             with self.assertRaises(InvalidDatePhrase, msg=phrase):
                 normalize_date_phrase(phrase)
 
+    def test_meridiem_hours_validated_before_conversion(self):
+        # A 12-hour clock only has hours 1-12. Checking the *converted*
+        # value lets nonsense through, because it lands back inside 0-23:
+        # "13am" stayed 13 and saved as 1pm, "0pm" became 12 and saved as
+        # noon — both silently different from what was typed.
+        for phrase in ("9/13 13am", "9/13 0pm", "9/13 00am", "9/13 15pm"):
+            with self.assertRaises(InvalidDatePhrase, msg=phrase):
+                normalize_date_phrase(phrase)
+
+    def test_meridiem_boundaries_still_valid(self):
+        for phrase, expected in (("9/13 12am", "00:00"), ("9/13 12pm", "12:00"),
+                                 ("9/13 1am", "01:00"), ("9/13 11pm", "23:00"),
+                                 ("9/13 noon", "12:00"), ("9/13 midnight", "00:00"),
+                                 ("9/13 00:00", "00:00"), ("9/13 23:59", "23:59")):
+            self.assertTrue(normalize_date_phrase(phrase).endswith(expected), phrase)
+
     def test_parse_keeps_invalid_time_visible_for_preview(self):
         # parse() runs per keystroke, so it must not raise; it keeps the
         # raw text so the preview shows what was typed.
