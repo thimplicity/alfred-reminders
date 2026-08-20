@@ -112,7 +112,7 @@ from _remctl import (
     run,
     today_reschedule_makes_sense,
 )
-from quick_add import escape_literal, parse as parse_quick_add
+from quick_add import escape_literal, notes_are_multiline, parse as parse_quick_add
 
 CACHE_TTL = 5  # seconds; only applies to scope-level fetches, not free text
 # Computed once at import time rather than per-render — Reminders.app's
@@ -226,8 +226,20 @@ def confirm_enabled():
     """Controlled by the CONFIRM_CHANGES workflow variable (on by default)
     — set it to 0/false/no in the workflow's variables to skip straight to
     executing mutations instead of reviewing a one-line summary first.
+
+    Only those three explicit values turn confirmation off. Anything else,
+    *including an empty or whitespace-only value*, leaves it on: clearing
+    the field in Alfred's workflow-configuration UI (or deleting the
+    variable's value while leaving the key) yields "", and the previous
+    version treated that as "off" — silently disabling the review step for
+    every mutation in the workflow, which is the one default that should
+    never fail open. An unrecognized value like "maybe" likewise keeps
+    confirmation on rather than guessing.
     """
-    return os.environ.get("CONFIRM_CHANGES", "1").strip().lower() not in ("0", "false", "no", "")
+    raw = os.environ.get("CONFIRM_CHANGES")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in ("0", "false", "no")
 
 
 # ---------------------------------------------------------------------------
@@ -705,7 +717,7 @@ def _quick_edit_prefill(info):
     if due_phrase:
         parts.append(f"/{due_phrase}")
     notes = info.get("notes")
-    if notes:
+    if notes and not notes_are_multiline(notes):
         # "notes:" and the escaped text are separate tokens, not fused
         # into one via an f-string — if notes starts with a marker-shaped
         # word ("#release details"), a fused "notes:\#release" would put
@@ -956,14 +968,29 @@ def render_quick_edit(reminder_id, return_q, typed_text):
         typed_text, auto_detect_due=False, recognize_list=False, preserve_boundary_whitespace=True
     )
 
+    # A multi-line note isn't editable here and is left untouched on
+    # confirm (see notes_are_multiline()) — say so in the slot rather than
+    # showing an empty "notes:" placeholder, which would read as "this
+    # reminder has no notes" or "confirming will clear them", both wrong.
+    try:
+        locked_notes = notes_are_multiline((run(["info", reminder_id], json_output=True) or {}).get("notes"))
+    except RemctlError:
+        locked_notes = False
+
     # Same "always show all the slots" treatment as remadd's own preview,
     # minus @list (not part of this screen's scope) — a slot switches
     # from its placeholder to the real value as soon as it's set.
+    if locked_notes:
+        notes_slot = "notes: (multi-line — kept as-is)"
+    elif parsed["notes"]:
+        notes_slot = f"notes: {parsed['notes']}"
+    else:
+        notes_slot = "notes:"
     meta = [
         " ".join(f"#{t}" for t in parsed["tags"]) if parsed["tags"] else "#tag",
         f"!{parsed['priority']}" if parsed["priority"] else "!priority",
         f"/{parsed['due']}" if parsed["due"] else "/due",
-        f"notes: {parsed['notes']}" if parsed["notes"] else "notes:",
+        notes_slot,
     ]
     hint = "  ·  ".join(meta)
 
@@ -1001,6 +1028,20 @@ def render_confirm(action, reminder_id, value):
     title = info.get("title") or f"#{reminder_id}"
     has_time = bool(info.get("dueDate")) and not info.get("allDay")
     time_note = " (keeping the time)" if has_time else ""
+
+    # Rechecked here as well as at execution time: the picker may have
+    # rendered "Today" while the reminder's time was still in the future,
+    # and this confirm screen can sit open long enough for it to pass.
+    # reminder_action.py would refuse the edit at that point, which is
+    # correct but arrives only as a notification *after* pressing Return —
+    # better to disarm the row here so it never looks actionable.
+    if action == "reschedule_today" and not today_reschedule_makes_sense(info):
+        return {"items": [{
+            "title": "That time has already passed today",
+            "subtitle": f"“{title}” — Tab back and pick Tomorrow, or set a specific time",
+            "valid": False,
+            "autocomplete": f"reschedule_picker:{reminder_id}:",
+        }]}
     summary_by_action = {
         "done": f"Mark “{title}” as complete",
         "edit": f"Change “{title}”'s title to “{value}”",

@@ -337,6 +337,13 @@ variable to `0` (Alfred's workflow configuration sheet, or edit
 skip straight to executing instead. Open/View details are never confirmed
 — they don't change anything.
 
+Only `0`, `false`, or `no` turn confirmation off. Anything else — an
+unrecognized value, or a **blank** one — leaves it on. That blank case
+matters: clearing the field in Alfred's configuration sheet yields an
+empty string, and an earlier version read that as "off", silently
+disabling the review step in front of every mutation. This is the one
+default in the workflow that should never fail open.
+
 Reschedule accepts `tomorrow`, `tom`, `next friday`, `2026-06-01`, `clear`,
 etc. — same trailing-phrase parsing as `remadd`'s due-date detection below
 — and shows the reminder's *current* due date the whole time you're
@@ -352,6 +359,35 @@ auto-converts hashtag-looking text into a tag (verified directly against
 a real reminder: `tags` stayed `null` after creating one with `#word` in
 the title). Reschedule and set-priority don't prefill, since a stale due
 date or priority isn't a useful starting point for either.
+
+**Known limitation — Quick edit can't edit a multi-line note.** Quick
+edit is a single-line grammar: the prefill goes out through Alfred's
+`autocomplete`, comes back as one flat query string, and the parser
+rebuilds the fields by splitting on spaces. A newline can't survive that
+— measured on a real reminder, a 7-line, 1001-character note came back as
+1001 characters on *one* line, every newline turned into a space. Same
+character count, so nothing about the result looked lossy. Rather than
+destroy the structure on a confirm the user thought only changed a
+priority, Quick edit now leaves a multi-line note **completely
+untouched**: the `notes:` slot shows "(multi-line — kept as-is)" and the
+stored note is never rewritten. Single-line notes are still fully
+editable, including clearing them by deleting the marker. To edit a
+multi-line note, use Reminders.app.
+
+**All-day dates are corrected on the way in.** remctl reports an all-day
+reminder's `dueDate` as UTC midnight rendered as a naive *local*
+timestamp, so every all-day reminder arrives dated a day early with a
+bogus time attached — a reminder genuinely due all-day Aug 21 arrives as
+`2026-08-20T20:00:00` in EDT, and one due Nov 26 as `2026-11-25T19:00:00`
+in EST (the offset tracks DST, so no fixed shift can undo it). Left
+alone, that showed the wrong day everywhere and, worse, made Quick edit
+silently move all-day reminders a day earlier on *any* confirm.
+`_normalize_all_day_due()` in `scripts/_remctl.py` reinterprets the value
+and rewrites it to plain local midnight at the single choke point every
+remctl read passes through, so the five separate consumers downstream
+never have to know. A value that doesn't reinterpret to an exact UTC
+midnight is passed through untouched, so a future remctl that emits
+all-day dates correctly won't get shifted twice.
 
 **Known limitation — no "Move to another list…"**: this workflow
 originally had one, calling `remctl edit ID -l LIST` (documented to fall
@@ -521,7 +557,19 @@ imported workflow misbehaves, it's almost certainly the hand-authored
 
 ## Testing the scripts directly
 
-No Alfred needed for this — they're plain argv/env scripts:
+There's a regression suite that needs neither Alfred nor remctl (every
+remctl call is stubbed, so it never touches real reminders):
+
+```bash
+python3 scripts/test_reminders.py
+```
+
+It's deliberately weighted toward the things that have actually broken:
+all-day date normalization, the Quick edit prefill/reparse round trip,
+due-phrase parsing, and the config defaults that decide whether a mutation
+gets confirmed. Add a case there before fixing any bug in those areas.
+
+For manual poking, they're also plain argv/env scripts:
 
 ```bash
 cd scripts

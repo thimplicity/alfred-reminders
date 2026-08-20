@@ -33,7 +33,15 @@ escape_literal().
 import re
 import sys
 
-from _remctl import RemctlError, looks_like_due_token, normalize_date_phrase, notify, run, split_implicit_due
+from _remctl import (
+    InvalidDatePhrase,
+    RemctlError,
+    looks_like_due_token,
+    normalize_date_phrase,
+    notify,
+    run,
+    split_implicit_due,
+)
 
 _WS_RUN_RE = re.compile(r"\s+")
 
@@ -92,6 +100,31 @@ def _is_marker_token(tok):
     if tok.startswith("/") and len(tok) > 1 and looks_like_due_token(tok[1:]):
         return True
     return False
+
+
+def notes_are_multiline(notes):
+    """True if `notes` spans more than one line, and therefore can't make
+    the Quick edit round trip intact.
+
+    Quick edit is a single-line grammar: the prefill goes out through
+    Alfred's `autocomplete`, comes back as one flat query string, and
+    parse() reassembles fields by splitting on spaces. A newline cannot
+    survive that — measured directly on a real reminder, a 7-line,
+    1001-character note came back as 1001 characters on *one* line, every
+    newline silently turned into a space. Same character count, so nothing
+    about the result looks lossy; the structure is just gone.
+
+    Both _quick_edit_prefill() (which omits the notes: marker entirely)
+    and execute_quick_edit() (which leaves the stored notes untouched)
+    call this, so the two agree without needing to pass a flag through the
+    query — the reminder's own current state is the shared signal, the
+    same way today_reschedule_makes_sense() is recomputed at execution
+    time rather than trusted from render time. The cost is that a
+    multi-line note can't be edited from this screen (use "Change
+    title…"'s sibling flow or Reminders.app); the alternative was
+    destroying it on a confirm the user thought only changed a priority.
+    """
+    return "\n" in (notes or "")
 
 
 def escape_literal(text):
@@ -290,7 +323,20 @@ def parse(query, auto_detect_due=True, recognize_list=True, preserve_boundary_wh
     # so it's always stripped before handing it to normalize_date_phrase()
     # regardless of preserve_boundary_whitespace — untested, unneeded
     # territory for that function otherwise.
-    due = normalize_date_phrase(" ".join(due_words).strip())
+    #
+    # An unusable time ("13pm", "0:70") makes normalize_date_phrase()
+    # raise, but this function runs on every keystroke to render the live
+    # preview, where a half-typed phrase is momentarily invalid all the
+    # time — raising there would replace the preview with an error row
+    # mid-word. The raw text is kept instead so the preview shows exactly
+    # what was typed; the execution paths call normalize_date_phrase()
+    # again on that raw value and surface the error properly at the point
+    # where it actually matters.
+    raw_due = " ".join(due_words).strip()
+    try:
+        due = normalize_date_phrase(raw_due)
+    except InvalidDatePhrase:
+        due = raw_due
 
     return {
         "title": title,
@@ -309,6 +355,18 @@ def main():
     if not parsed["title"]:
         notify("Reminders", "No title given — nothing added.")
         sys.exit(1)
+
+    # parse() deliberately keeps an unusable time as raw text so the live
+    # preview stays readable while typing (see its comment). This is the
+    # point of no return, though, so re-run the normalization and let an
+    # invalid time stop the add instead of reaching remctl.
+    if parsed["due"]:
+        try:
+            parsed["due"] = normalize_date_phrase(parsed["due"])
+        except InvalidDatePhrase as exc:
+            notify("Reminders — failed to add", str(exc))
+            print(exc, file=sys.stderr)
+            sys.exit(1)
 
     args = ["add", parsed["title"]]
     if parsed["list"]:
