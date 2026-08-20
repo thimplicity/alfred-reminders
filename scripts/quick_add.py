@@ -35,14 +35,27 @@ import sys
 
 from _remctl import RemctlError, looks_like_due_token, normalize_date_phrase, notify, run, split_implicit_due
 
-# Any run of whitespace — space(s), a tab, a newline — counts as one
-# boundary; splitting with a capturing group keeps the separator text
-# itself in the result, so "".join(...) on an unmodified split reproduces
-# the input exactly. escape_literal() needs this (not just literal-space
-# splitting) so a marker-shaped word separated from prior text only by a
-# newline — a later line of a multi-line note — still gets detected and
-# escaped, before Alfred flattens that newline into a space on its own.
-_WS_RE = re.compile(r"(\s+)")
+_WS_RUN_RE = re.compile(r"\s+")
+
+
+def _normalize_whitespace(text):
+    """Collapses every whitespace *character* in a run to a literal ASCII
+    space, while preserving the run's exact *length* — so a tab, newline,
+    or non-breaking space (anything `\\s` matches) becomes as many plain
+    spaces, not fewer. escape_literal() and parse() both call this first,
+    so they always agree on where a boundary is: without it, escape_literal
+    could detect and escape a marker-shaped word separated from prior text
+    by a tab or non-breaking space (real cases: pasted text, a later line
+    of a multi-line note collapsed by Alfred before parse() ever sees it),
+    while parse()'s `query.split(" ")` — literal-space-only — would never
+    see that same boundary, leaving the escaping backslash fused into one
+    token where the leading-backslash unescape check can't find it, so it
+    leaks permanently into the saved text. Normalizing character *type*
+    while keeping run *length* means the existing split(" ")/" ".join()
+    round trip (see escape_literal()/parse()'s docstrings) stays exact —
+    it only cares how many boundary characters there are, not what kind.
+    """
+    return _WS_RUN_RE.sub(lambda m: " " * len(m.group()), text)
 
 PRIORITY_MAP = {
     "h": "high", "high": "high",
@@ -98,15 +111,21 @@ def escape_literal(text):
     words that would actually be misread get a backslash — a title with
     none of them round-trips with no visible change.
 
-    Splits on whitespace runs via `_WS_RE`, capturing each separator
-    (spaces, tabs, newlines) verbatim rather than reducing it to a fixed
-    delimiter, so the original spacing — including a marker-shaped word
-    that starts a later line of a multi-line note — survives exactly.
-    `_is_marker_token()` is always False for a whitespace-only or empty
-    string, so separator segments just pass through `"".join(...)`
-    unchanged alongside the (possibly escaped) word segments.
+    Runs `_normalize_whitespace()` first (see its docstring) so any tab,
+    newline, or non-breaking space becomes that many plain spaces before
+    splitting — keeping escape_literal() and parse() in agreement on
+    where a boundary is, without losing whitespace-run-length fidelity.
+    Splits on literal single spaces rather than `str.split()`'s default
+    (which treats any run of whitespace as one delimiter) so that repeated
+    spaces in the (now-normalized) text survive: a run of N spaces becomes
+    N-1 empty-string "words" between real ones, each safely non-marker
+    (`_is_marker_token("")` is False), and `" ".join(...)` reconstructs
+    exactly the same run of spaces on the way back out. `parse()` uses the
+    same normalize/split/join approach for the same reason — see its
+    docstring.
     """
-    return "".join(("\\" + w if _is_marker_token(w) else w) for w in _WS_RE.split(text))
+    text = _normalize_whitespace(text)
+    return " ".join(("\\" + w if _is_marker_token(w) else w) for w in text.split(" "))
 
 
 def parse(query, auto_detect_due=True, recognize_list=True, preserve_boundary_whitespace=False):
@@ -135,20 +154,19 @@ def parse(query, auto_detect_due=True, recognize_list=True, preserve_boundary_wh
     as a marker at all in this context, escaped or not, typed fresh or
     not, so there's nothing left to protect against.
 
-    Tokenizes on literal single spaces (`query.split(" ")`), not generic
-    whitespace-run splitting, so that repeated spaces within a field
-    (title or notes) survive a prefill/reparse round trip instead of
-    silently collapsing to one — a run of N spaces yields N-1 empty-string
-    tokens, each inert (no marker check matches an empty string, so it
-    just falls through to whichever accumulator is active), and the final
-    `" ".join(...)` calls below reproduce the original spacing exactly.
-    Verified: 'Buy  milk   at store' round-trips as 'Buy  milk   at store',
-    not 'Buy milk at store'. (Newlines don't need the same treatment here:
-    by the time Quick edit's prefill reaches this function, Alfred has
-    already flattened any newline in the query into a space — it's only
-    escape_literal(), building that prefill *before* Alfred sees it, that
-    needs whitespace-run-aware splitting to catch a marker on a later
-    line; see its docstring.)
+    Runs `_normalize_whitespace()` first (see its docstring) so a tab,
+    newline, or non-breaking space in the query behaves exactly like that
+    many plain spaces — matching escape_literal(), which normalizes the
+    same way before deciding what to escape, so the two always agree on
+    where a boundary is. Tokenizes on literal single spaces
+    (`query.split(" ")`), not generic whitespace-run splitting, so that
+    repeated spaces within a field (title or notes) survive a
+    prefill/reparse round trip instead of silently collapsing to one — a
+    run of N spaces yields N-1 empty-string tokens, each inert (no marker
+    check matches an empty string, so it just falls through to whichever
+    accumulator is active), and the final `" ".join(...)` calls below
+    reproduce the original spacing exactly. Verified: 'Buy  milk   at
+    store' round-trips as 'Buy  milk   at store', not 'Buy milk at store'.
 
     `preserve_boundary_whitespace=True` skips the final `.strip()` on
     title/due/notes — used by Quick edit…, where an *existing* note can
@@ -158,6 +176,7 @@ def parse(query, auto_detect_due=True, recognize_list=True, preserve_boundary_wh
     where accidental leading/trailing spaces are just typos worth
     cleaning up, not data worth preserving.
     """
+    query = _normalize_whitespace(query)
     plain_tokens, due_words, notes_words, tags = [], [], [], []
     plain_escaped = []  # parallel to plain_tokens: True if from a \escape
     list_name = priority = None
