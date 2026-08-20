@@ -885,8 +885,13 @@ def render_quick_edit(reminder_id, return_q, typed_text):
     # (see _quick_edit_prefill()'s docstring), so a fresh "@word" typed
     # here — not just one already in the prefilled text — must stay
     # literal too, not get silently parsed into a list name and dropped.
-    # See parse()'s docstring in quick_add.py.
-    parsed = parse_quick_add(typed_text, auto_detect_due=False, recognize_list=False)
+    # preserve_boundary_whitespace=True: an existing note can legitimately
+    # start or end with whitespace (an indented first line) — confirming
+    # some unrelated field shouldn't silently trim that away. See
+    # parse()'s docstring in quick_add.py.
+    parsed = parse_quick_add(
+        typed_text, auto_detect_due=False, recognize_list=False, preserve_boundary_whitespace=True
+    )
 
     # Same "always show all the slots" treatment as remadd's own preview,
     # minus @list (not part of this screen's scope) — a slot switches
