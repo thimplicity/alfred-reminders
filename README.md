@@ -166,9 +166,11 @@ All optional, in the workflow's configuration sheet:
 
 ## Limitations
 
-**No "move to another list."** A limitation in remctl's own move, not
-this workflow — reproduced calling `remctl` directly. Move it in
-Reminders.app instead.
+**No "move to another list."** `remctl`'s own move failed with an
+EventKit error on the machine this was built on — reproduced calling
+`remctl` directly, so not a bug in this workflow. It may well work on
+yours, but the action was dropped rather than shipped as something that
+could silently fail. Move it in Reminders.app instead.
 
 **Quick edit won't touch a multi-line note.** It's a single-line editor
 and a newline can't survive the round trip, so it leaves multi-line notes
