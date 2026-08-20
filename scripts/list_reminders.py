@@ -108,7 +108,7 @@ from _remctl import (
     reminders_app_icon,
     run,
 )
-from quick_add import parse as parse_quick_add
+from quick_add import escape_literal, parse as parse_quick_add
 
 CACHE_TTL = 5  # seconds; only applies to scope-level fetches, not free text
 # Computed once at import time rather than per-render — Reminders.app's
@@ -680,8 +680,16 @@ def _quick_edit_prefill(info):
     feature after remctl's own -l move consistently failed on this
     machine (see README), and reintroducing list-changing through this
     back door would hit the identical bug.
+
+    Title and notes go through escape_literal() — an *existing* title or
+    notes can legitimately contain "@alice", "#release", "!high", or
+    "notes:something" as ordinary words (someone else's reminder, or one
+    created via Siri/Reminders.app directly, not composed with this
+    grammar in mind), and without escaping, confirming this screen while
+    changing some unrelated field would silently reinterpret those words
+    as new metadata instead of leaving them alone — verified directly.
     """
-    parts = [info.get("title") or ""]
+    parts = [escape_literal(info.get("title") or "")]
     for tag in info.get("tags") or []:
         parts.append(f"#{tag}")
     priority = info.get("priority")
@@ -692,7 +700,7 @@ def _quick_edit_prefill(info):
         parts.append(f"/{due_phrase}")
     notes = info.get("notes")
     if notes:
-        parts.append(f"notes:{notes}")
+        parts.append(f"notes:{escape_literal(notes)}")
     return " ".join(parts)
 
 
