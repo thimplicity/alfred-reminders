@@ -628,6 +628,57 @@ def today_reschedule_makes_sense(info):
     return (due_dt.hour, due_dt.minute) > (now.hour, now.minute)
 
 
+def is_past_due(item, now=None):
+    """True if `item` is genuinely past its due moment.
+
+    An all-day reminder counts only once the *day* is over — one due
+    all-day today is still due today at 11pm, not overdue since midnight.
+    A timed reminder is compared against the actual clock.
+    """
+    if item.get("completed"):
+        return False
+    raw = item.get("dueDate")
+    if not isinstance(raw, str):
+        return False
+    try:
+        due = dt.datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return False
+    now = now or dt.datetime.now()
+    if item.get("allDay"):
+        return due.date() < now.date()
+    return due < now
+
+
+def fetch_overdue_items(cached=True):
+    """Every reminder actually past due, including ones due *earlier
+    today*.
+
+    `remctl overdue` alone is not enough: it means "dated before today",
+    a whole-day comparison, so a reminder due at 9am is not overdue at
+    5pm the same day. That produced a genuinely confusing dead end — after
+    a bulk "reschedule overdue to today", every reminder lands on today at
+    its original (already past) time, so they look overdue in the list
+    while `remctl overdue` reports none, and the bulk action that would
+    fix them refuses to run. Verified directly: 12 reminders visibly past
+    due, `remctl overdue` returning 0.
+
+    `remctl today` does include them, so the two are merged and filtered
+    by is_past_due(), deduplicated by id, oldest first. Both are existing
+    cached scopes, so this costs no extra remctl calls in the common case.
+    `cached=False` forces a fresh read for the execution path, where the
+    set must not be whatever was true when the confirm screen rendered.
+    """
+    now = dt.datetime.now()
+    seen = {}
+    for cache_key, args in (("scope:overdue", ["overdue"]), ("scope:today", ["today"])):
+        payload = cached_run(cache_key, args) if cached else run(args)
+        for item in items_from(payload):
+            if is_past_due(item, now):
+                seen[str(item.get("id"))] = item
+    return sorted(seen.values(), key=lambda i: i.get("dueDate") or "")
+
+
 def matches_smart_list(item, smart_list):
     """Best-effort client-side re-implementation of a custom smart list's
     filter, since remctl can inspect a smart list's definition but has no

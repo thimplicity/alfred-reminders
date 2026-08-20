@@ -17,7 +17,7 @@ import sys
 from _remctl import (
     CACHE_DIR,
     RemctlError,
-    items_from,
+    fetch_overdue_items,
     normalize_date_phrase,
     notify,
     run,
@@ -67,8 +67,12 @@ def bulk_reschedule_overdue(target):
     reminder's own time of day. One reminder failing doesn't stop the
     rest; failures are collected and reported together.
     """
-    payload = run(["overdue"], json_output=True)
-    items = items_from(payload)
+    # cached=False for the same reason this was a bare run() before: the
+    # set is re-derived at execution time, not inherited from whatever the
+    # confirm screen happened to show. Includes reminders due earlier
+    # today, which `remctl overdue` alone leaves out — see
+    # fetch_overdue_items().
+    items = fetch_overdue_items(cached=False)
     if not items:
         notify("Reminders", "No overdue reminders to reschedule.")
         return
