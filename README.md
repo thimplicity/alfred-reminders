@@ -214,6 +214,8 @@ The interaction design is inspired by
 [Alfredo](https://alfred.app/workflows/giovanni/alfredo/), Giovanni's
 Todoist workflow.
 
+Built with [Claude Code](https://claude.com/claude-code).
+
 ---
 
 Working on the workflow itself? See [docs/INTERNALS.md](docs/INTERNALS.md)
