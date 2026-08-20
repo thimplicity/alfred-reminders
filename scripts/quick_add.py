@@ -202,8 +202,22 @@ def parse(query, auto_detect_due=True, recognize_list=True):
             plain_tokens.append(tok)
 
     if auto_detect_due and not explicit_due and plain_tokens:
-        plain_tokens, implicit_due = split_implicit_due(plain_tokens)
+        # split_implicit_due() scans from the tail looking for a date-like
+        # anchor and stops as soon as a token doesn't look date-like — an
+        # empty-string separator token (see the split(" ") note above)
+        # isn't date-like either, so it would stop the scan right there
+        # and hide any real due phrase behind it. This path is remadd-only
+        # (auto_detect_due is False for Quick edit…), where the title is
+        # fresh typed input rather than existing text being round-tripped,
+        # so there's no whitespace-fidelity requirement to preserve here —
+        # filtering blank tokens out before the scan, and using the
+        # (already single-spaced) result directly, is safe. Matters in
+        # practice because quick_add_filter.py's own completions append a
+        # trailing space after the picked word.
+        non_blank = [t for t in plain_tokens if t]
+        non_blank, implicit_due = split_implicit_due(non_blank)
         due_words = implicit_due + due_words
+        plain_tokens = non_blank
 
     return {
         "title": " ".join(plain_tokens).strip(),
