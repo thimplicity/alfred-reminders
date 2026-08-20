@@ -7,7 +7,7 @@ reschedule something or tick it off. Changes sync through Apple's own
 Reminders database, so they show up on your iPhone and iPad like any other
 edit.
 
-<!-- Screenshots go here before posting. -->
+![Browsing reminders with the rem keyword — each row shows its list, due date, priority and flag](docs/screenshots/browse.png)
 
 ## Usage
 
@@ -32,6 +32,10 @@ Add a scope or some text to narrow it down:
 `@` and `#` complete as you type — `rem @Gro` narrows to matching lists,
 and <kbd>⇥</kbd> fills in the full name.
 
+![Searching for "budget" across every list](docs/screenshots/search.png)
+
+![The @ list picker, showing real lists and smart lists side by side](docs/screenshots/list-picker.png)
+
 ### Acting on a reminder
 
 Press <kbd>↩</kbd> or <kbd>⇥</kbd> on any reminder to open its action menu:
@@ -46,6 +50,8 @@ Press <kbd>↩</kbd> or <kbd>⇥</kbd> on any reminder to open its action menu:
 | **Flag** / **Unflag** | |
 | **View details** | Everything about the reminder, read-only |
 | **Open in Reminders.app** | |
+
+![The action menu for a single reminder](docs/screenshots/action-menu.png)
 
 Every screen has a **← Back** row except the final confirmation
 (backspace to cancel that one), and Back from the action menu returns you
