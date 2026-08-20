@@ -903,8 +903,12 @@ def render_quick_edit(reminder_id, return_q, typed_text):
     # day-like word ("Review on Monday") as title="Review" due="on
     # Monday" on every confirm, even when only some other field was being
     # changed. Only an explicit /phrase or due: marker sets a due date
-    # here. See parse()'s docstring in quick_add.py.
-    parsed = parse_quick_add(typed_text, auto_detect_due=False)
+    # here. recognize_list=False: Quick edit has no @List slot at all
+    # (see _quick_edit_prefill()'s docstring), so a fresh "@word" typed
+    # here — not just one already in the prefilled text — must stay
+    # literal too, not get silently parsed into a list name and dropped.
+    # See parse()'s docstring in quick_add.py.
+    parsed = parse_quick_add(typed_text, auto_detect_due=False, recognize_list=False)
 
     # Same "always show all the slots" treatment as remadd's own preview,
     # minus @list (not part of this screen's scope) — a slot switches
