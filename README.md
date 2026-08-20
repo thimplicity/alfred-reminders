@@ -210,7 +210,7 @@ install.
 ## Thanks
 
 Built on [remctl](https://github.com/viticci/remctl) by Federico Viticci.
-The interaction design borrows heavily from
+The interaction design is inspired by
 [Alfredo](https://alfred.app/workflows/giovanni/alfredo/), Giovanni's
 Todoist workflow.
 
