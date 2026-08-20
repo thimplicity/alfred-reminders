@@ -19,6 +19,16 @@ longer `due:<phrase>`, still supported — both run to the end of the
 query) to disambiguate. `notes:` works the same way and is never
 auto-detected, since free text can't be told apart from a due phrase by
 pattern alone.
+
+A word can be forced to stay literal — never read as `@`/`#`/`!`/`due:`/
+`notes:`/a slash-date, no matter its shape — by prefixing it with a
+backslash (a literal backslash character before the word, e.g. an
+escaped "@alice" or "#release"). Not something you'd normally type by
+hand; it exists so list_reminders.py's Quick edit… screen can safely
+prefill an *existing* reminder's title/notes (which might legitimately
+contain "@alice" or "#release" as ordinary words) without those getting
+silently reinterpreted as new metadata on the next confirm. See
+escape_literal().
 """
 import sys
 
@@ -29,6 +39,47 @@ PRIORITY_MAP = {
     "m": "medium", "medium": "medium",
     "l": "low", "low": "low",
 }
+
+
+def _is_marker_token(tok):
+    """True if `parse()` would read this token as `@List`/`#tag`/
+    `!priority`/`due:`/`notes:`/a slash-date, rather than plain text —
+    the exact set of conditions escape_literal() needs to shield a word
+    from. Kept in sync with parse()'s own checks by construction (same
+    conditions, just returning a bool instead of consuming the token).
+    """
+    low = tok.lower()
+    if tok.startswith("@") and len(tok) > 1:
+        return True
+    if tok.startswith("#") and len(tok) > 1:
+        return True
+    if tok.startswith("!") and low[1:] in PRIORITY_MAP:
+        return True
+    if low.startswith("due:"):
+        return True
+    if low.startswith("notes:"):
+        return True
+    if tok.startswith("/") and len(tok) > 1 and looks_like_due_token(tok[1:]):
+        return True
+    return False
+
+
+def escape_literal(text):
+    """Backslash-prefixes any word in `text` that `parse()` would
+    otherwise read as `@`/`#`/`!`/`due:`/`notes:`/slash-date syntax, so it
+    survives an edit-and-reparse round trip as plain text. For
+    list_reminders.py's Quick edit… screen, which prefills this same
+    grammar from an *existing* reminder's title/notes — ordinary text
+    can legitimately start with any of those characters ("Email @alice",
+    "Discuss #release", "Use !high", "Read notes:first draft" are all
+    real titles a person might actually have), and re-parsing that text
+    unescaped would silently reinterpret those words as new metadata
+    (or, for `@`, just discard them — Quick edit has no list-changing
+    slot to put a parsed list name into) instead of leaving them alone.
+    Only words that would actually be misread get a backslash — a title
+    with no marker-shaped words round-trips with no visible change.
+    """
+    return " ".join(("\\" + w if _is_marker_token(w) else w) for w in text.split())
 
 
 def parse(query, auto_detect_due=True):
@@ -51,6 +102,19 @@ def parse(query, auto_detect_due=True):
     explicit_due = False
 
     for tok in query.split():
+        # A leading backslash (see escape_literal()) forces this token to
+        # stay literal — mode-appropriate plain text, never reinterpreted
+        # as @/#/!/due:/notes:/slash-date syntax regardless of shape.
+        # Checked before every marker rule below so escaping is absolute.
+        if tok.startswith("\\") and len(tok) > 1:
+            literal = tok[1:]
+            if mode == "due":
+                due_words.append(literal)
+            elif mode == "notes":
+                notes_words.append(literal)
+            else:
+                plain_tokens.append(literal)
+            continue
         low = tok.lower()
         if tok.startswith("@") and len(tok) > 1:
             mode = None

@@ -276,7 +276,13 @@ starts pre-filled with the current value, so deleting a marker is a
 visible, deliberate act. Multi-line notes get flattened to single-line
 on the way through, since Alfred's query bar can't hold literal
 newlines — for anything beyond a quick tweak to long notes, edit them in
-Reminders.app directly.
+Reminders.app directly. If the reminder's own title or notes happen to
+contain something that looks like this syntax — a real title like "Email
+@alice" or "Discuss #release" — the prefill escapes it automatically
+(`escape_literal()` in `scripts/quick_add.py`) so it round-trips as plain
+text instead of being misread as new metadata (or, for `@`, silently
+discarded — Quick edit has no list-changing slot); you'll never see the
+escaping yourself unless you go looking at the raw query text mid-edit.
 
 **Set priority…** is a fixed 4-choice picker (None, Low, Medium, High)
 rather than free text — priority only has these values, so there's
