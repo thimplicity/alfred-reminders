@@ -87,8 +87,16 @@ def escape_literal(text):
     put a parsed list name into) instead of leaving them alone. Only
     words that would actually be misread get a backslash — a title with
     none of them round-trips with no visible change.
+
+    Splits on literal single spaces rather than `str.split()`'s default
+    (which treats any run of whitespace as one delimiter) so that repeated
+    spaces in the original text survive: a run of N spaces becomes N-1
+    empty-string "words" between real ones, each safely non-marker
+    (`_is_marker_token("")` is False), and `" ".join(...)` reconstructs
+    exactly the same run of spaces on the way back out. `parse()` uses the
+    same split/join approach for the same reason — see its docstring.
     """
-    return " ".join(("\\" + w if _is_marker_token(w) else w) for w in text.split())
+    return " ".join(("\\" + w if _is_marker_token(w) else w) for w in text.split(" "))
 
 
 def parse(query, auto_detect_due=True, recognize_list=True):
@@ -116,13 +124,23 @@ def parse(query, auto_detect_due=True, recognize_list=True):
     parsed list value). With recognize_list=False, `@` is never treated
     as a marker at all in this context, escaped or not, typed fresh or
     not, so there's nothing left to protect against.
+
+    Tokenizes on literal single spaces (`query.split(" ")`), not generic
+    whitespace-run splitting, so that repeated spaces within a field
+    (title or notes) survive a prefill/reparse round trip instead of
+    silently collapsing to one — a run of N spaces yields N-1 empty-string
+    tokens, each inert (no marker check matches an empty string, so it
+    just falls through to whichever accumulator is active), and the final
+    `" ".join(...)` calls below reproduce the original spacing exactly.
+    Verified: 'Buy  milk   at store' round-trips as 'Buy  milk   at store',
+    not 'Buy milk at store'.
     """
     plain_tokens, due_words, notes_words, tags = [], [], [], []
     list_name = priority = None
     mode = None  # None | 'due' | 'notes'
     explicit_due = False
 
-    for tok in query.split():
+    for tok in query.split(" "):
         # A leading backslash (see escape_literal()) forces this token to
         # stay literal — mode-appropriate plain text, never reinterpreted
         # as @/#/!/due:/notes:/slash-date syntax regardless of shape.
