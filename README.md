@@ -18,7 +18,7 @@ Add a scope or some text to narrow it down:
 
 | Query | Shows |
 |---|---|
-| `rem` | Due today + overdue (you can also set the default (smart) list in the settings) |
+| `rem` | Due today + overdue — configurable, see `DEFAULT_SCOPE` below |
 | `rem milk` | Search every list (title and notes) |
 | `rem @Work` | One list or smart list |
 | `rem @` | Pick from a list of your lists |
@@ -90,7 +90,7 @@ remadd Pay rent /2026-06-01 notes:autopay is off this month
 | `!high` `!medium` `!low` | Priority (`!h` `!m` `!l` work too) |
 | `notes:…` | The notes — but stops at the next `@`, `#`, `!` or date marker (see below) |
 
-**The due date needs no marker** A trailing date phrase is
+**The due date needs no marker.** A trailing date phrase is
 detected automatically: `tomorrow`, `tom`, `next friday`, `9am`,
 `2026-06-01`, `+3d`, `9/13`, `sep 9`, even glued forms like `tom9am` or
 `sep9`. If a title genuinely ends in something date-like and gets
@@ -166,9 +166,14 @@ All optional, in the workflow's configuration sheet:
 
 ## Limitations
 
-**No "move to another list."** Seems to be a limitation with remctl
+**No "move to another list."** A limitation in remctl's own move, not
+this workflow — reproduced calling `remctl` directly. Move it in
+Reminders.app instead.
 
-**Quick edit won't touch a multi-line note.** It's a single-line editor, and a newline can't survive
+**Quick edit won't touch a multi-line note.** It's a single-line editor
+and a newline can't survive the round trip, so it leaves multi-line notes
+untouched and says so on screen. Title, tags, priority and due date still
+edit normally; use Reminders.app to edit the note itself.
 
 **Smart lists are approximated.** remctl can read a smart list's *rules*
 but not its contents, so the filter (tags, dates, priority, flagged) is
