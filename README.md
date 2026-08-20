@@ -7,7 +7,7 @@ reschedule something or tick it off. Changes sync through Apple's own
 Reminders database, so they show up on your iPhone and iPad like any other
 edit.
 
-![Browsing reminders with the rem keyword — each row shows its list, due date, priority and flag](docs/screenshots/browse.png)
+![Browsing the Demo list — each row shows its list, due date, priority markers and flag](docs/screenshots/browse.png)
 
 ## Usage
 
