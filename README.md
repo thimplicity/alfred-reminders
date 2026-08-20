@@ -18,9 +18,9 @@ Add a scope or some text to narrow it down:
 
 | Query | Shows |
 |---|---|
-| `rem` | Due today + overdue |
+| `rem` | Due today + overdue (you can also set the default (smart) list in the settings) |
 | `rem milk` | Search every list (title and notes) |
-| `rem @Work` | One list — or a smart list |
+| `rem @Work` | One list or smart list |
 | `rem @` | Pick from a list of your lists |
 | `rem #errand` | Everything with that tag |
 | `rem #` | Pick from your tags |
@@ -43,7 +43,7 @@ Press <kbd>↩</kbd> or <kbd>⇥</kbd> on any reminder to open its action menu:
 | Action | |
 |---|---|
 | **Mark as complete** | |
-| **Reschedule…** | Today, Tomorrow, or type any date |
+| **Reschedule…** | Today, Tomorrow, or type any date and time |
 | **Change title…** | Add `#tags` while you're there |
 | **Quick edit…** | Title, tags, priority, due date and notes in one line |
 | **Set priority…** | None / Low / Medium / High |
