@@ -31,7 +31,20 @@ PRIORITY_MAP = {
 }
 
 
-def parse(query):
+def parse(query, auto_detect_due=True):
+    """`auto_detect_due=False` disables the trailing-due-phrase heuristic
+    entirely (only an explicit `/phrase` or `due:phrase` marker sets a due
+    date) — used by list_reminders.py's Quick edit… screen, which
+    prefills this same syntax from an *existing* reminder's title rather
+    than fresh user input. There, a title that happens to end in a
+    day-like word ("Review on Monday") would otherwise get silently
+    split into title="Review", due="on Monday" on every confirm, even
+    when the user only meant to change some other field — verified
+    directly. remadd itself keeps the heuristic on (the default), since
+    typing "buy milk tomorrow" without a marker is the whole point there
+    and the title is fresh input the user is actively composing, not
+    existing data being blindly re-parsed.
+    """
     plain_tokens, due_words, notes_words, tags = [], [], [], []
     list_name = priority = None
     mode = None  # None | 'due' | 'notes'
@@ -85,7 +98,7 @@ def parse(query):
         else:
             plain_tokens.append(tok)
 
-    if not explicit_due and plain_tokens:
+    if auto_detect_due and not explicit_due and plain_tokens:
         plain_tokens, implicit_due = split_implicit_due(plain_tokens)
         due_words = implicit_due + due_words
 
