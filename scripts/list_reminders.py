@@ -696,7 +696,17 @@ def _quick_edit_prefill(info):
         parts.append(f"/{due_phrase}")
     notes = info.get("notes")
     if notes:
-        parts.append(f"notes:{escape_literal(notes)}")
+        # "notes:" and the escaped text are separate tokens, not fused
+        # into one via an f-string — if notes starts with a marker-shaped
+        # word ("#release details"), a fused "notes:\#release" would put
+        # the backslash inside the *same* token as the "notes:" prefix,
+        # where parse()'s leading-backslash unescape check never sees it
+        # (that check only fires on a token's own leading character, and
+        # here the leading character is "n"). Keeping "notes:" on its own
+        # lets the escaped first word start its own token instead, where
+        # the unescape check applies normally — verified directly.
+        parts.append("notes:")
+        parts.append(escape_literal(notes))
     return " ".join(parts)
 
 
