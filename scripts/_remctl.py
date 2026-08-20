@@ -15,12 +15,22 @@ CANDIDATE_PATHS = [
 ]
 
 
+def _is_runnable(path):
+    """A regular file we actually have execute permission on. isfile()
+    alone isn't enough — pointing REMCTL_PATH at a readable-but-not-
+    executable file (or a directory) got that path selected here and then
+    blew up as an uncaught PermissionError at subprocess time instead of
+    falling through to the next candidate.
+    """
+    return bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)
+
+
 def find_remctl():
     env_path = os.environ.get("REMCTL_PATH")
-    if env_path and os.path.isfile(env_path):
+    if _is_runnable(env_path):
         return env_path
     for path in CANDIDATE_PATHS:
-        if os.path.isfile(path):
+        if _is_runnable(path):
             return path
     found = shutil.which("remctl")
     if found:
@@ -88,6 +98,73 @@ class RemctlError(RuntimeError):
         self.stderr = stderr
 
 
+def _normalize_all_day_due(item):
+    """Rewrite an all-day reminder's `dueDate` to local midnight on the day
+    it's actually due.
+
+    remctl serializes an all-day reminder as *UTC* midnight rendered as a
+    naive local timestamp, so every all-day reminder arrives dated one day
+    early (west of UTC) with a bogus time attached. Verified against
+    EventKit ground truth on this machine: a reminder genuinely due
+    all-day Aug 21 arrives as "2026-08-20T20:00:00" (EDT, UTC-4), and one
+    due Nov 26 arrives as "2026-11-25T19:00:00" (EST, UTC-5) — the offset
+    tracks DST, so this can't be corrected with a fixed shift. Confirmed
+    that every all-day item on this machine lands on exactly 00:00:00 UTC
+    once reinterpreted, which is what makes the round trip below safe.
+
+    Interpreting the naive value as local time and converting to UTC
+    recovers the true date; it's then rewritten as plain local midnight so
+    everything downstream (humanize_due(), _due_prefill(),
+    _due_preserving_time(), today_reschedule_makes_sense(),
+    _matches_date()) can keep treating dueDate as naive local without
+    knowing any of this happened. Doing it here, at the single choke point
+    every remctl read passes through, avoids five separate consumers each
+    having to remember the quirk — an earlier version of this workflow got
+    it wrong in all five places at once, including silently moving an
+    all-day reminder a day earlier on every Quick edit confirm.
+
+    Left alone if the value doesn't reinterpret to an exact UTC midnight,
+    so a future remctl that emits all-day dates correctly (or a machine
+    already running in UTC) passes through untouched rather than being
+    shifted a second time.
+    """
+    raw = item.get("dueDate")
+    if not item.get("allDay") or not isinstance(raw, str):
+        return
+    try:
+        naive = dt.datetime.fromisoformat(raw)
+    except ValueError:
+        return
+    if naive.tzinfo is not None:
+        return
+    utc = naive.astimezone(dt.timezone.utc)
+    if (utc.hour, utc.minute, utc.second) != (0, 0, 0):
+        return
+    item["dueDate"] = dt.datetime.combine(utc.date(), dt.time.min).isoformat()
+
+
+def _normalize_payload(payload):
+    """Apply _normalize_all_day_due() to every reminder dict in a decoded
+    remctl JSON payload, whatever shape it arrived in — a bare list of
+    reminders, the `--via-eventkit` {"items": [...]} wrapper, or the single
+    dict that `remctl info <id>` returns. Payloads with no reminders in
+    them at all (`lists`, `tags`, `smart-lists`) simply have nothing to
+    match and pass through untouched.
+    """
+    if isinstance(payload, dict):
+        if isinstance(payload.get("items"), list):
+            for entry in payload["items"]:
+                if isinstance(entry, dict):
+                    _normalize_all_day_due(entry)
+        else:
+            _normalize_all_day_due(payload)
+    elif isinstance(payload, list):
+        for entry in payload:
+            if isinstance(entry, dict):
+                _normalize_all_day_due(entry)
+    return payload
+
+
 def run(args, json_output=True, timeout=10):
     """Run `remctl <args>` and return parsed JSON (or raw stdout text)."""
     binary = find_remctl()
@@ -105,6 +182,14 @@ def run(args, json_output=True, timeout=10):
         )
     except subprocess.TimeoutExpired as exc:
         raise RemctlError(f"remctl timed out: {' '.join(cmd)}") from exc
+    except OSError as exc:
+        # Covers the whole family of "couldn't even start it": the file
+        # vanished between find_remctl()'s check and here, it isn't
+        # executable, it's a directory, the architecture doesn't match.
+        # Without this these surface as an uncaught traceback — every
+        # caller already handles RemctlError and renders it as a normal
+        # "remctl error" row, so route it there instead.
+        raise RemctlError(f"Could not run remctl at {binary}: {exc}") from exc
 
     if proc.returncode != 0:
         raise RemctlError(
@@ -119,9 +204,13 @@ def run(args, json_output=True, timeout=10):
     if not stdout:
         return []
     try:
-        return json.loads(stdout)
+        payload = json.loads(stdout)
     except json.JSONDecodeError as exc:
         raise RemctlError(f"Could not parse remctl JSON output: {exc}") from exc
+    # Every remctl read in the workflow funnels through here, which is
+    # exactly why the all-day date correction lives at this point rather
+    # than in each consumer — see _normalize_all_day_due().
+    return _normalize_payload(payload)
 
 
 CACHE_DIR = os.environ.get(
@@ -157,11 +246,25 @@ def cached_run(cache_key, args, ttl=5, json_output=True):
         pass
 
     result = run(args, json_output=json_output)
+    # Write to a unique temp file in the same directory, then rename over
+    # the target — rename is atomic within a filesystem, so a reader never
+    # observes a half-written file. Alfred spawns a fresh process per
+    # keystroke, so concurrent readers and writers of the same cache key
+    # are routine, not hypothetical; the plain write this replaces could
+    # be interleaved into a torn read (survivable, since the read path
+    # catches JSONDecodeError, but it silently cost a redundant remctl
+    # call every time it happened). The pid suffix keeps two concurrent
+    # writers from clobbering each other's temp file mid-write.
+    tmp_file = f"{cache_file}.{os.getpid()}.tmp"
     try:
-        with open(cache_file, "w") as fh:
+        with open(tmp_file, "w") as fh:
             json.dump(result, fh)
+        os.replace(tmp_file, cache_file)
     except OSError:
-        pass
+        try:
+            os.remove(tmp_file)
+        except OSError:
+            pass
     return result
 
 
@@ -456,6 +559,14 @@ def normalize_date_phrase(text):
                 hour += 12
             elif meridiem == "am" and hour == 12:
                 hour = 0
+            # The regex only bounds digit *count*, not range, so "25:00",
+            # "0:70" and "13pm" (-> 25:00) all matched and were handed to
+            # remctl as-is, which then either errors obscurely or silently
+            # does something unintended. Reject an out-of-range time
+            # instead and keep scanning: better to fall through to
+            # date-only than to invent a wrong time.
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                continue
             time_24h = f"{hour:02d}:{minute:02d}"
             break
 
@@ -485,7 +596,11 @@ def today_reschedule_makes_sense(info):
         return True
     try:
         due_dt = dt.datetime.fromisoformat(info["dueDate"])
-    except ValueError:
+    except (ValueError, TypeError):
+        # TypeError too, not just ValueError: fromisoformat() raises it for
+        # a non-string dueDate, and a bare `except ValueError` let that
+        # escape as an uncaught traceback. Same guard _matches_date()
+        # already uses on the identical call.
         return True
     now = dt.datetime.now()
     return (due_dt.hour, due_dt.minute) > (now.hour, now.minute)

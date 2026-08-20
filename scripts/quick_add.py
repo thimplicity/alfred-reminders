@@ -94,6 +94,31 @@ def _is_marker_token(tok):
     return False
 
 
+def notes_are_multiline(notes):
+    """True if `notes` spans more than one line, and therefore can't make
+    the Quick edit round trip intact.
+
+    Quick edit is a single-line grammar: the prefill goes out through
+    Alfred's `autocomplete`, comes back as one flat query string, and
+    parse() reassembles fields by splitting on spaces. A newline cannot
+    survive that — measured directly on a real reminder, a 7-line,
+    1001-character note came back as 1001 characters on *one* line, every
+    newline silently turned into a space. Same character count, so nothing
+    about the result looks lossy; the structure is just gone.
+
+    Both _quick_edit_prefill() (which omits the notes: marker entirely)
+    and execute_quick_edit() (which leaves the stored notes untouched)
+    call this, so the two agree without needing to pass a flag through the
+    query — the reminder's own current state is the shared signal, the
+    same way today_reschedule_makes_sense() is recomputed at execution
+    time rather than trusted from render time. The cost is that a
+    multi-line note can't be edited from this screen (use "Change
+    title…"'s sibling flow or Reminders.app); the alternative was
+    destroying it on a confirm the user thought only changed a priority.
+    """
+    return "\n" in (notes or "")
+
+
 def escape_literal(text):
     """Backslash-prefixes any word in `text` that `parse()` would
     otherwise read as `@`/`#`/`!`/`due:`/`notes:`/slash-date syntax (or

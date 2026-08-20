@@ -23,7 +23,7 @@ from _remctl import (
     run,
     today_reschedule_makes_sense,
 )
-from quick_add import parse as parse_quick_add
+from quick_add import notes_are_multiline, parse as parse_quick_add
 
 _TAG_TOKEN_RE = re.compile(r"(?:(?<=\s)|^)#(\S+) ?")
 
@@ -114,17 +114,30 @@ def execute_quick_edit(reminder_id, typed_text):
         typed_text, auto_detect_due=False, recognize_list=False, preserve_boundary_whitespace=True
     )
     if not parsed["title"]:
-        print("No title — quick edit cancelled.", file=sys.stderr)
-        sys.exit(1)
+        fail("No title — quick edit cancelled.")
 
     args = [
         "edit", reminder_id,
         "--title", parsed["title"],
         "-d", normalize_date_phrase(parsed["due"]) if parsed["due"] else "clear",
         "-p", parsed["priority"] or "none",
-        "-n", parsed["notes"] or "",
         "--private",
     ]
+    # A multi-line note is deliberately left out of the prefill (see
+    # notes_are_multiline()), so "no notes: marker in the text" doesn't
+    # mean "the user deleted it" here the way it does for every other
+    # field — it means the note was never representable on this screen at
+    # all. Omitting -n entirely leaves the stored note untouched; passing
+    # -n "" (the normal clear-what's-absent behavior) would wipe it. The
+    # check is recomputed from live state rather than trusted from render
+    # time, so the two sides can't drift.
+    current_notes = ""
+    try:
+        current_notes = (run(["info", reminder_id], json_output=True) or {}).get("notes") or ""
+    except RemctlError:
+        pass
+    if not notes_are_multiline(current_notes):
+        args += ["-n", parsed["notes"] or ""]
     args += ["--set-tags", ",".join(parsed["tags"])] if parsed["tags"] else ["--clear-tags"]
     run(args, json_output=False)
 
@@ -150,6 +163,25 @@ def extract_tags(text):
     return new_title, tags
 
 
+def fail(message, detail=""):
+    """Abort with something the user can actually see.
+
+    This workflow has no Post Notification object wired into either Run
+    Script — the whole graph is two Script Filters feeding two Run Scripts
+    — so writing to stderr and exiting non-zero produces *no* visible
+    feedback at all: the action simply appears to do nothing, with the
+    explanation buried in Alfred's debug console. Every abort therefore
+    posts a notification itself (the same way quick_add.py already did for
+    remadd's failures) and then still writes to stderr for the debugger.
+    """
+    notify("Reminders", message)
+    print(f"{message}\n{detail}".strip(), file=sys.stderr)
+    sys.exit(1)
+
+
+BULK_TARGETS = ("today", "tomorrow")
+
+
 def main():
     action = os.environ.get("action")
     reminder_id = os.environ.get("reminder_id")
@@ -158,18 +190,24 @@ def main():
     # Bulk actions operate on a whole scope, not one reminder_id — handled
     # before the reminder_id check below, which every other action needs.
     if action == "bulk_reschedule_overdue":
-        target = os.environ.get("target") or "today"
+        # Only the two values the UI can actually produce. This rides in
+        # as a workflow variable, and it's interpolated straight into a
+        # remctl date argument for *every* overdue reminder — the one
+        # place in the workflow where a bad value would be applied in
+        # bulk, so it's worth refusing outright rather than letting
+        # remctl interpret whatever arrives.
+        target = (os.environ.get("target") or "today").strip().lower()
+        if target not in BULK_TARGETS:
+            fail(f"Unknown reschedule target “{target}” — expected today or tomorrow.")
         try:
             bulk_reschedule_overdue(target)
         except RemctlError as exc:
-            print(f"{exc}\n{exc.stderr}", file=sys.stderr)
-            sys.exit(1)
+            fail(f"Bulk reschedule failed: {exc}", exc.stderr)
         clear_cache()
         return
 
     if not reminder_id:
-        print("Missing reminder_id — action aborted.", file=sys.stderr)
-        sys.exit(1)
+        fail("Missing reminder_id — action aborted.")
 
     try:
         if action == "open":
@@ -178,20 +216,17 @@ def main():
             run(["done", reminder_id], json_output=False)
         elif action == "edit":
             if not typed_text:
-                print("No title entered — edit cancelled.", file=sys.stderr)
-                sys.exit(1)
+                fail("No title entered — edit cancelled.")
             new_title, tags = extract_tags(typed_text)
             if not new_title:
-                print("No title text (only tags) — edit cancelled.", file=sys.stderr)
-                sys.exit(1)
+                fail("No title text (only tags) — edit cancelled.")
             args = ["edit", reminder_id, "--title", new_title]
             if tags:
                 args += ["--private", "-t", ",".join(tags)]
             run(args, json_output=False)
         elif action == "reschedule":
             if not typed_text:
-                print("No date entered — reschedule cancelled.", file=sys.stderr)
-                sys.exit(1)
+                fail("No date entered — reschedule cancelled.")
             run(["edit", reminder_id, "-d", normalize_date_phrase(typed_text)], json_output=False)
         elif action in ("reschedule_today", "reschedule_tomorrow"):
             target = "today" if action == "reschedule_today" else "tomorrow"
@@ -205,11 +240,7 @@ def main():
             # was meant to prevent — so abort instead of silently
             # rescheduling to an already-elapsed time.
             if target == "today" and not today_reschedule_makes_sense(info):
-                print(
-                    "That time has already passed today — reschedule to tomorrow or pick a specific time instead.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+                fail("That time has already passed today — reschedule to tomorrow instead.")
             run(["edit", reminder_id, "-d", _due_preserving_time(info, target)], json_output=False)
         elif action == "flag":
             # `remctl flag <id>` (AppleScript UI automation) needs
@@ -224,20 +255,16 @@ def main():
             run(["edit", reminder_id, "--private", "--no-flagged"], json_output=False)
         elif action == "priority":
             if not typed_text:
-                print("No priority chosen — priority change cancelled.", file=sys.stderr)
-                sys.exit(1)
+                fail("No priority chosen — priority change cancelled.")
             run(["edit", reminder_id, "-p", typed_text], json_output=False)
         elif action == "quickedit":
             if not typed_text:
-                print("Nothing typed — quick edit cancelled.", file=sys.stderr)
-                sys.exit(1)
+                fail("Nothing typed — quick edit cancelled.")
             execute_quick_edit(reminder_id, typed_text)
         else:
-            print(f"Unknown action: {action}", file=sys.stderr)
-            sys.exit(1)
+            fail(f"Unknown action: {action}")
     except RemctlError as exc:
-        print(f"{exc}\n{exc.stderr}", file=sys.stderr)
-        sys.exit(1)
+        fail(f"{action} failed: {exc}", exc.stderr)
 
     clear_cache()
 
