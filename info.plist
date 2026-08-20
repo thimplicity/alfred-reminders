@@ -146,6 +146,18 @@
 			<integer>2</integer>
 		</dict>
 	</array>
+	<key>readme</key>
+	<string>Search, add, complete and edit Apple Reminders without leaving Alfred.
+
+**rem** — browse and search. Type a scope to narrow it: `@List`, `#tag`, `all`, `upcoming 7`, `flagged`, `overdue`. `@` and `#` complete as you type. Press Return or Tab on any reminder for its action menu: complete, reschedule, retitle, quick edit, set priority, flag, view details.
+
+**remadd** — add one. `remadd Buy milk @Groceries tomorrow 9am`. The due date needs no marker; `@List`, `#tag`, `!priority` and `notes:` are optional.
+
+**Setup:** requires remctl (github.com/viticci/remctl). Alfred needs both Reminders access *and* Full Disk Access — granting only the first is the usual reason it works in Terminal but not here. Run `remctl doctor` to check.
+
+**Configuration:** CONFIRM_CHANGES reviews each change before applying (on by default). DEFAULT_SCOPE sets what a bare `rem` shows.
+
+Full documentation and known limitations: github.com/thimplicity/alfred-reminders</string>
 	<key>uidata</key>
 	<dict>
 		<key>27B333B0-14A1-4F18-806C-47C01FDA6C03</key>
@@ -192,5 +204,7 @@
 	<array/>
 	<key>version</key>
 	<string>1.0.0</string>
+	<key>webaddress</key>
+	<string>https://github.com/thimplicity/alfred-reminders</string>
 </dict>
 </plist>
