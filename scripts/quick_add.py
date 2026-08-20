@@ -42,13 +42,20 @@ PRIORITY_MAP = {
 
 
 def _is_marker_token(tok):
-    """True if `parse()` would read this token as `@List`/`#tag`/
-    `!priority`/`due:`/`notes:`/a slash-date, rather than plain text —
-    the exact set of conditions escape_literal() needs to shield a word
-    from. Kept in sync with parse()'s own checks by construction (same
-    conditions, just returning a bool instead of consuming the token).
+    """True if `parse()` would read this token as something other than
+    plain literal text: `@List`/`#tag`/`!priority`/`due:`/`notes:`/a
+    slash-date, *or* a token that already starts with a literal backslash
+    (parse()'s own escape character — an unescaped one would itself get
+    silently stripped on reparse, e.g. a real title word like a Windows
+    UNC-style path starting with a backslash, so it needs protecting same
+    as any other marker-shaped word). The exact set of conditions escape_literal()
+    needs to shield a word from; kept in sync with parse()'s own checks
+    by construction (same conditions, just returning a bool instead of
+    consuming the token).
     """
     low = tok.lower()
+    if tok.startswith("\\"):
+        return True
     if tok.startswith("@") and len(tok) > 1:
         return True
     if tok.startswith("#") and len(tok) > 1:
@@ -66,18 +73,20 @@ def _is_marker_token(tok):
 
 def escape_literal(text):
     """Backslash-prefixes any word in `text` that `parse()` would
-    otherwise read as `@`/`#`/`!`/`due:`/`notes:`/slash-date syntax, so it
-    survives an edit-and-reparse round trip as plain text. For
-    list_reminders.py's Quick edit… screen, which prefills this same
-    grammar from an *existing* reminder's title/notes — ordinary text
-    can legitimately start with any of those characters ("Email @alice",
-    "Discuss #release", "Use !high", "Read notes:first draft" are all
-    real titles a person might actually have), and re-parsing that text
-    unescaped would silently reinterpret those words as new metadata
-    (or, for `@`, just discard them — Quick edit has no list-changing
-    slot to put a parsed list name into) instead of leaving them alone.
-    Only words that would actually be misread get a backslash — a title
-    with no marker-shaped words round-trips with no visible change.
+    otherwise read as `@`/`#`/`!`/`due:`/`notes:`/slash-date syntax (or
+    that already starts with a literal backslash — escaping the escape
+    character, so *that* backslash survives too), so it survives an
+    edit-and-reparse round trip as plain text. For list_reminders.py's
+    Quick edit… screen, which prefills this same grammar from an
+    *existing* reminder's title/notes — ordinary text can legitimately
+    start with any of those characters ("Email @alice", "Discuss
+    #release", "Use !high", "Read notes:first draft" are all real titles
+    a person might actually have), and re-parsing that text
+    unescaped would silently reinterpret those words as new metadata (or,
+    for `@`, just discard them — Quick edit has no list-changing slot to
+    put a parsed list name into) instead of leaving them alone. Only
+    words that would actually be misread get a backslash — a title with
+    none of them round-trips with no visible change.
     """
     return " ".join(("\\" + w if _is_marker_token(w) else w) for w in text.split())
 
