@@ -203,7 +203,21 @@ file/folder results, not something a custom Script Filter can hook into.
 The action menu, in order:
 
 1. **Mark as complete**
-2. **Reschedule…**
+2. **Reschedule…** — opens a picker: **Today**, **Tomorrow**, or **Pick a
+   date…** (the original free-text entry). Today/Tomorrow preserve the
+   reminder's existing time of day rather than dropping it (a reminder
+   due at 9am stays due at 9am, just today/tomorrow instead of wherever
+   it was before; an all-day reminder stays all-day) — same
+   time-preserving logic as the `rem overdue today`/`tomorrow` bulk
+   action, just for the one reminder you're already looking at. **Today**
+   is omitted from the picker when the reminder has a specific time
+   that's already passed today — offering it then would just bounce the
+   reminder straight back to overdue the moment it's picked, silently
+   defeating the point (see `_today_reschedule_makes_sense()` in
+   `scripts/list_reminders.py`). Both go through the normal confirm step
+   like any other single-item mutation, same as "Pick a date…" — the
+   confirm summary itself notes "(keeping the time)" only when there's an
+   actual time to keep.
 3. **Change title…**
 4. **Quick edit…** — title, tags, priority, due, and notes together in
    one editable line, for changing several of them without repeating the
@@ -250,24 +264,19 @@ Return meant for the menu's top action. Backspacing the query text still
 works too, same as before.
 
 **View details** shows title, list, due date, priority, flag, tags, and
-notes as a read-only screen (Return on any line just opens the reminder
-in Reminders.app, same as browsing normally). Each line has its own icon
-too, matching the equivalent action's icon where one exists (Priority's
-icon is the same as "Set priority…"'s, Flagged's the same as
-"Flag"/"Unflag"'s, List the same Reminders.app icon used everywhere
-lists show up, Due the same Calendar icon as "Reschedule…") — see
-`VIEW_ICONS` in `scripts/list_reminders.py`. Below the read-only lines,
-two quick actions — **"Reschedule to today"** / **"Reschedule to
-tomorrow"** — jump the due date forward without retyping a full date,
-preserving the existing time of day if one is set (a reminder due at 9am
-stays due at 9am, just today/tomorrow instead of wherever it was before;
-an all-day reminder stays all-day) — same time-preserving logic as the
-`rem overdue today`/`tomorrow` bulk action, just for the one reminder
-you're already looking at rather than every overdue one. These go
-through the normal confirm step like any other single-item mutation
-(unlike bulk reschedule, which always confirms regardless of
-`CONFIRM_CHANGES`) — the confirm summary itself notes "(keeping the
-time)" only when there's an actual time to keep.
+notes as a purely read-only screen (Return on any line just opens the
+reminder in Reminders.app, same as browsing normally) — no actions live
+here, only "Reschedule…"'s picker (above) and the rest of the action
+menu do. Each line has its own icon too, matching the equivalent action's
+icon where one exists (Priority's icon is the same as "Set
+priority…"'s, Flagged's the same as "Flag"/"Unflag"'s, List the same
+Reminders.app icon used everywhere lists show up, Due the same Calendar
+icon as "Reschedule…") — see `VIEW_ICONS` in `scripts/list_reminders.py`.
+The quick Today/Tomorrow reschedule shortcuts used to live at the bottom
+of this screen, but that made them easy to miss — a screen that otherwise
+reads as pure information isn't where you'd look for a mutating action —
+so they moved to "Reschedule…"'s own picker instead, alongside every
+other action.
 
 **Quick edit…** is one editable line covering title, `#tag`s,
 `!priority`, `/due`, and `notes:` together — the exact same syntax

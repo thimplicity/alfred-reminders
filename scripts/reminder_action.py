@@ -14,7 +14,15 @@ import os
 import re
 import sys
 
-from _remctl import CACHE_DIR, RemctlError, items_from, normalize_date_phrase, notify, run
+from _remctl import (
+    CACHE_DIR,
+    RemctlError,
+    items_from,
+    normalize_date_phrase,
+    notify,
+    run,
+    today_reschedule_makes_sense,
+)
 from quick_add import parse as parse_quick_add
 
 _TAG_TOKEN_RE = re.compile(r"(?:(?<=\s)|^)#(\S+) ?")
@@ -188,6 +196,20 @@ def main():
         elif action in ("reschedule_today", "reschedule_tomorrow"):
             target = "today" if action == "reschedule_today" else "tomorrow"
             info = run(["info", reminder_id], json_output=True)
+            # Revalidated here, not just when list_reminders.py rendered
+            # the "Today" option — CONFIRM_CHANGES adds a real review
+            # step between picking it and executing, long enough for a
+            # time-of-day that was still in the future at render time to
+            # have passed by now. Executing anyway would immediately
+            # bounce the reminder back to overdue, the exact trap this
+            # was meant to prevent — so abort instead of silently
+            # rescheduling to an already-elapsed time.
+            if target == "today" and not today_reschedule_makes_sense(info):
+                print(
+                    "That time has already passed today — reschedule to tomorrow or pick a specific time instead.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             run(["edit", reminder_id, "-d", _due_preserving_time(info, target)], json_output=False)
         elif action == "flag":
             # `remctl flag <id>` (AppleScript UI automation) needs

@@ -8,16 +8,19 @@ does the current query string look like":
   browse (default)   rem <scope> <text>              -> reminder list
   menu:<id>:<ret>     reached via Tab or Return         -> action menu for one item
   edit:<id>:<ret>:<text>    reached via the menu        -> retitle, typing <text>
-  due:<id>:<ret>:<text>     reached via the menu        -> reschedule, typing <text>
+  reschedule_picker:<id>:<ret> reached via the menu     -> Today/Tomorrow/Pick a
+                              date… (Today omitted when the reminder's own
+                              time has already passed today — see
+                              today_reschedule_makes_sense() in _remctl.py)
+  due:<id>:<ret>:<text>     reached via reschedule_picker's "Pick a date…"
+                              (or directly, from confirm/quickedit)  ->
+                              reschedule, typing <text>
   priority:<id>:<ret>:<text> reached via the menu       -> set priority, picking one
   quickedit:<id>:<ret>:<text> reached via the menu      -> title/tags/priority/due/
                               notes together, typing <text> (see
                               render_quick_edit()'s docstring for syntax)
   view:<id>:<ret>     reached via the menu              -> read-only detail
-                              screen, plus two quick "reschedule to
-                              today/tomorrow" actions below the read-only
-                              lines (time-of-day preserving, see
-                              reminder_action.py's _due_preserving_time())
+                              screen (notes, priority, flag, tags, ...)
   confirm:<action>:<id>:<value>  reached from a menu action or a filled-in
                        text entry/picker              -> one-line summary,
                        one more Return actually executes it (skip via the
@@ -107,6 +110,7 @@ from _remctl import (
     normalize_date_phrase,
     reminders_app_icon,
     run,
+    today_reschedule_makes_sense,
 )
 from quick_add import escape_literal, parse as parse_quick_add
 
@@ -153,6 +157,7 @@ DUE_ICON = app_icon("/System/Applications/Calendar.app")
 MENU_ICONS = {
     "done": MARK_COMPLETE_ICON,
     "due": DUE_ICON,
+    "reschedule_picker": DUE_ICON,
     "edit": app_icon("/System/Applications/TextEdit.app"),
     "quickedit": app_icon("/System/Applications/System Settings.app"),
     "priority": PRIORITY_ICON,
@@ -213,6 +218,7 @@ DUE_RE = re.compile(r"^due:(\d+):([^:]*):(.*)$", re.DOTALL)
 PRIORITY_RE = re.compile(r"^priority:(\d+):([^:]*):(.*)$", re.DOTALL)
 QUICKEDIT_RE = re.compile(r"^quickedit:(\d+):([^:]*):(.*)$", re.DOTALL)
 VIEW_RE = re.compile(r"^view:(\d+):(.*)$", re.DOTALL)
+RESCHEDULE_PICKER_RE = re.compile(r"^reschedule_picker:(\d+):(.*)$", re.DOTALL)
 CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|reschedule_today|reschedule_tomorrow|flag|unflag|priority|quickedit):(\d+):(.*)$", re.DOTALL)
 
 
@@ -591,7 +597,7 @@ def render_browse(query):
 # import time.
 MENU_ACTIONS_MAIN = [
     ("Mark as complete", "done", None, None, False, True),
-    ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am", False, None),
+    ("Reschedule…", None, "reschedule_picker", "today, tomorrow, or pick a date", None, None),
     ("Change title…", None, "edit", "type a new title, or add #tag to tag it", True, None),
 ]
 MENU_ACTIONS_PRIORITY = [
@@ -714,6 +720,58 @@ def _quick_edit_prefill(info):
     return " ".join(parts)
 
 
+def _reschedule_quick_item(label, action, reminder_id, title):
+    if confirm_enabled():
+        return {
+            "title": label,
+            "subtitle": f"“{title}” — review before confirming",
+            "valid": False,
+            "autocomplete": f"confirm:{action}:{reminder_id}:",
+            **_menu_icon_kwargs("due"),
+        }
+    return {
+        "title": label,
+        "subtitle": f"“{title}”",
+        "arg": reminder_id,
+        "valid": True,
+        "variables": {"action": action, "reminder_id": reminder_id, "reminder_title": title},
+        **_menu_icon_kwargs("due"),
+    }
+
+
+def render_reschedule_picker(reminder_id, return_q):
+    """"Reschedule…"'s own picker, reached via Tab/Return from the action
+    menu: Today (omitted — see today_reschedule_makes_sense() in
+    _remctl.py — when the reminder has a specific time that's already
+    passed today), Tomorrow, or "Pick a date…" (drills into the existing
+    free-text due-entry screen, same as before this picker existed).
+    Today/Tomorrow both preserve the reminder's existing time of day
+    exactly like the bulk overdue-reschedule action. This is only the
+    render-time check — reminder_action.py revalidates independently
+    right before actually executing reschedule_today, since confirm can
+    add a real gap between this render and execution.
+    """
+    try:
+        info = run(["info", reminder_id], json_output=True)
+    except RemctlError as exc:
+        return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
+
+    title = info.get("title") or f"#{reminder_id}"
+    items = []
+    if today_reschedule_makes_sense(info):
+        items.append(_reschedule_quick_item("Today", "reschedule_today", reminder_id, title))
+    items.append(_reschedule_quick_item("Tomorrow", "reschedule_tomorrow", reminder_id, title))
+    items.append({
+        "title": "Pick a date…",
+        "subtitle": f"“{title}” — type a due date, e.g. tomorrow 9am",
+        "valid": False,
+        "autocomplete": f"due:{reminder_id}:{return_q}:",
+        **_menu_icon_kwargs("due"),
+    })
+    items.append(_back_item(reminder_id, return_q))
+    return {"items": items}
+
+
 def render_menu(reminder_id, return_q=""):
     """Actions only — no read-only detail lines mixed in here, so this
     stays a pure "what do you want to do" list; "View details" below is
@@ -818,33 +876,6 @@ def render_view(reminder_id, return_q=""):
         }
         for label, value in lines
     ]
-
-    # Quick reschedule shortcuts — same time-of-day-preserving logic as
-    # the overdue bulk-reschedule action (_due_preserving_time() in
-    # reminder_action.py), just for this one reminder instead of every
-    # currently-overdue one. Appended after the detail lines (not first),
-    # same reasoning as Back below — these are real mutations, so they
-    # go through the normal confirm step like any other single-item
-    # action (unlike bulk reschedule, which always confirms regardless).
-    for label, target in (("Reschedule to today", "today"), ("Reschedule to tomorrow", "tomorrow")):
-        action = f"reschedule_{target}"
-        if confirm_enabled():
-            items.append({
-                "title": label,
-                "subtitle": f"“{title}” — review before confirming",
-                "valid": False,
-                "autocomplete": f"confirm:{action}:{reminder_id}:",
-                **_menu_icon_kwargs("due"),
-            })
-        else:
-            items.append({
-                "title": label,
-                "subtitle": f"“{title}”",
-                "arg": reminder_id,
-                "valid": True,
-                "variables": {"action": action, "reminder_id": reminder_id, "reminder_title": title},
-                **_menu_icon_kwargs("due"),
-            })
 
     items.append(_back_item(reminder_id, return_q))
     return {"items": items}
@@ -1069,6 +1100,11 @@ def main():
     view_match = VIEW_RE.match(query)
     if view_match:
         print(json.dumps(render_view(view_match.group(1), view_match.group(2))))
+        return
+
+    reschedule_picker_match = RESCHEDULE_PICKER_RE.match(query)
+    if reschedule_picker_match:
+        print(json.dumps(render_reschedule_picker(reschedule_picker_match.group(1), reschedule_picker_match.group(2))))
         return
 
     print(json.dumps(render_browse(query)))

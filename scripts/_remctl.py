@@ -462,6 +462,35 @@ def normalize_date_phrase(text):
     return f"{resolved_date} {time_24h}" if time_24h else resolved_date
 
 
+def today_reschedule_makes_sense(info):
+    """False when offering/executing "reschedule to today" would be a
+    trap: a reminder with a specific time whose time-of-day has already
+    passed today would go straight back to overdue the moment it's
+    rescheduled, since the today/tomorrow shortcuts preserve the existing
+    time of day rather than dropping it — silently defeating the whole
+    point of using them to clear an overdue reminder. Always True for an
+    all-day reminder (no time to compare against) or one with no due date
+    yet at all (nothing to preserve).
+
+    Shared by list_reminders.py (deciding whether to show "Today" in the
+    Reschedule… picker) and reminder_action.py (revalidating right before
+    actually executing reschedule_today) — checking only at render time
+    isn't enough: the picker can render, get confirmed, and get executed
+    minutes apart (longer still with CONFIRM_CHANGES on, which adds a
+    whole extra review step), enough time for a time-of-day that was
+    still in the future when the picker rendered to have passed by
+    execution.
+    """
+    if info.get("allDay") or not info.get("dueDate"):
+        return True
+    try:
+        due_dt = dt.datetime.fromisoformat(info["dueDate"])
+    except ValueError:
+        return True
+    now = dt.datetime.now()
+    return (due_dt.hour, due_dt.minute) > (now.hour, now.minute)
+
+
 def matches_smart_list(item, smart_list):
     """Best-effort client-side re-implementation of a custom smart list's
     filter, since remctl can inspect a smart list's definition but has no
