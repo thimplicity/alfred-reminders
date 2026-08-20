@@ -33,7 +33,15 @@ escape_literal().
 import re
 import sys
 
-from _remctl import RemctlError, looks_like_due_token, normalize_date_phrase, notify, run, split_implicit_due
+from _remctl import (
+    InvalidDatePhrase,
+    RemctlError,
+    looks_like_due_token,
+    normalize_date_phrase,
+    notify,
+    run,
+    split_implicit_due,
+)
 
 _WS_RUN_RE = re.compile(r"\s+")
 
@@ -315,7 +323,20 @@ def parse(query, auto_detect_due=True, recognize_list=True, preserve_boundary_wh
     # so it's always stripped before handing it to normalize_date_phrase()
     # regardless of preserve_boundary_whitespace — untested, unneeded
     # territory for that function otherwise.
-    due = normalize_date_phrase(" ".join(due_words).strip())
+    #
+    # An unusable time ("13pm", "0:70") makes normalize_date_phrase()
+    # raise, but this function runs on every keystroke to render the live
+    # preview, where a half-typed phrase is momentarily invalid all the
+    # time — raising there would replace the preview with an error row
+    # mid-word. The raw text is kept instead so the preview shows exactly
+    # what was typed; the execution paths call normalize_date_phrase()
+    # again on that raw value and surface the error properly at the point
+    # where it actually matters.
+    raw_due = " ".join(due_words).strip()
+    try:
+        due = normalize_date_phrase(raw_due)
+    except InvalidDatePhrase:
+        due = raw_due
 
     return {
         "title": title,
@@ -334,6 +355,18 @@ def main():
     if not parsed["title"]:
         notify("Reminders", "No title given — nothing added.")
         sys.exit(1)
+
+    # parse() deliberately keeps an unusable time as raw text so the live
+    # preview stays readable while typing (see its comment). This is the
+    # point of no return, though, so re-run the normalization and let an
+    # invalid time stop the add instead of reaching remctl.
+    if parsed["due"]:
+        try:
+            parsed["due"] = normalize_date_phrase(parsed["due"])
+        except InvalidDatePhrase as exc:
+            notify("Reminders — failed to add", str(exc))
+            print(exc, file=sys.stderr)
+            sys.exit(1)
 
     args = ["add", parsed["title"]]
     if parsed["list"]:

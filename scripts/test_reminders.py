@@ -7,13 +7,17 @@ actually broke in review rather than toward line coverage: the date/all-day
 handling, the Quick edit prefill/reparse round trip, and the config
 defaults that decide whether a mutation gets confirmed at all.
 """
+import contextlib
 import datetime as dt
+import os
 import sys
+import time
 import unittest
 from unittest import mock
 
 import _remctl
 from _remctl import (
+    InvalidDatePhrase,
     _normalize_all_day_due,
     normalize_date_phrase,
     split_implicit_due,
@@ -22,35 +26,81 @@ from _remctl import (
 from quick_add import escape_literal, notes_are_multiline, parse
 
 
+@contextlib.contextmanager
+def fixed_timezone(name):
+    """Pin the process timezone for the duration of the block.
+
+    _normalize_all_day_due() converts naive timestamps using the host's
+    local zone, so any fixture written as a literal string only means what
+    it's supposed to mean in the zone it was captured in. An earlier
+    version of this file hardcoded values captured in US/Eastern and
+    failed four tests on a UTC machine (and in US/Pacific) — the suite
+    advertises itself as dependency-free and portable, so it has to
+    actually be both.
+    """
+    previous = os.environ.get("TZ")
+    os.environ["TZ"] = name
+    time.tzset()
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous
+        time.tzset()
+
+
+def remctl_style_all_day(target_date):
+    """Build what remctl *would* emit for an all-day reminder due on
+    `target_date`, in whatever timezone the process is currently in: UTC
+    midnight for that date, rendered as a naive local timestamp.
+    """
+    utc_midnight = dt.datetime.combine(target_date, dt.time.min, tzinfo=dt.timezone.utc)
+    return utc_midnight.astimezone().replace(tzinfo=None).isoformat()
+
+
 class AllDayNormalization(unittest.TestCase):
     """remctl reports an all-day reminder as UTC midnight rendered as a
-    naive *local* timestamp, i.e. dated a day early west of UTC. Values
-    below are real ones captured from this machine and cross-checked
-    against EventKit.
+    naive *local* timestamp, i.e. dated a day early west of UTC.
     """
 
-    def test_edt_item_moves_to_true_date(self):
-        item = {"allDay": True, "dueDate": "2026-08-20T20:00:00"}
-        with mock.patch.object(_remctl.dt, "datetime", wraps=dt.datetime):
-            _normalize_all_day_due(item)
-        self.assertEqual(item["dueDate"][:10], "2026-08-21")
+    def test_recovers_true_date_in_any_timezone(self):
+        # Derived rather than hardcoded, so this holds east of UTC
+        # (Europe/Berlin), west of it (US/Pacific), and at it — where the
+        # correction is correctly a no-op.
+        for zone in ("US/Eastern", "US/Pacific", "UTC", "Europe/Berlin", "Asia/Tokyo"):
+            with fixed_timezone(zone):
+                for target in (dt.date(2026, 8, 21), dt.date(2026, 11, 26), dt.date(2027, 1, 1)):
+                    item = {"allDay": True, "dueDate": remctl_style_all_day(target)}
+                    _normalize_all_day_due(item)
+                    self.assertEqual(item["dueDate"][:10], target.isoformat(), f"{zone} {target}")
 
-    def test_est_item_moves_to_true_date(self):
-        item = {"allDay": True, "dueDate": "2026-11-25T19:00:00"}
-        _normalize_all_day_due(item)
-        self.assertEqual(item["dueDate"][:10], "2026-11-26")
+    def test_real_captured_eastern_fixtures(self):
+        # The actual strings observed from remctl on the machine this was
+        # found on, cross-checked against EventKit — pinned to the zone
+        # they were captured in so they stay meaningful anywhere.
+        with fixed_timezone("US/Eastern"):
+            for raw, expected in (("2026-08-20T20:00:00", "2026-08-21"),   # EDT, UTC-4
+                                  ("2026-11-25T19:00:00", "2026-11-26")):  # EST, UTC-5
+                item = {"allDay": True, "dueDate": raw}
+                _normalize_all_day_due(item)
+                self.assertEqual(item["dueDate"][:10], expected)
 
     def test_normalized_to_local_midnight(self):
-        item = {"allDay": True, "dueDate": "2026-08-20T20:00:00"}
-        _normalize_all_day_due(item)
-        self.assertTrue(item["dueDate"].endswith("T00:00:00"))
+        with fixed_timezone("US/Eastern"):
+            item = {"allDay": True, "dueDate": "2026-08-20T20:00:00"}
+            _normalize_all_day_due(item)
+            self.assertTrue(item["dueDate"].endswith("T00:00:00"))
 
     def test_idempotent(self):
-        item = {"allDay": True, "dueDate": "2026-08-20T20:00:00"}
-        _normalize_all_day_due(item)
-        once = item["dueDate"]
-        _normalize_all_day_due(item)
-        self.assertEqual(item["dueDate"], once)
+        for zone in ("US/Eastern", "UTC", "Asia/Tokyo"):
+            with fixed_timezone(zone):
+                item = {"allDay": True, "dueDate": remctl_style_all_day(dt.date(2026, 8, 21))}
+                _normalize_all_day_due(item)
+                once = item["dueDate"]
+                _normalize_all_day_due(item)
+                self.assertEqual(item["dueDate"], once, zone)
 
     def test_timed_reminder_untouched(self):
         item = {"allDay": False, "dueDate": "2026-08-20T09:00:00"}
@@ -68,27 +118,64 @@ class AllDayNormalization(unittest.TestCase):
         self.assertIsNone(item.get("dueDate"))
 
     def test_payload_shapes(self):
-        raw = "2026-08-20T20:00:00"
-        as_list = _remctl._normalize_payload([{"allDay": True, "dueDate": raw}])
-        as_wrapped = _remctl._normalize_payload({"items": [{"allDay": True, "dueDate": raw}]})
-        as_single = _remctl._normalize_payload({"allDay": True, "dueDate": raw})
-        for shape, payload in (("list", as_list[0]), ("wrapped", as_wrapped["items"][0]), ("single", as_single)):
-            self.assertEqual(payload["dueDate"][:10], "2026-08-21", shape)
+        with fixed_timezone("US/Eastern"):
+            raw = remctl_style_all_day(dt.date(2026, 8, 21))
+            as_list = _remctl._normalize_payload([{"allDay": True, "dueDate": raw}])
+            as_wrapped = _remctl._normalize_payload({"items": [{"allDay": True, "dueDate": raw}]})
+            as_single = _remctl._normalize_payload({"allDay": True, "dueDate": raw})
+            for shape, payload in (("list", as_list[0]),
+                                   ("wrapped", as_wrapped["items"][0]),
+                                   ("single", as_single)):
+                self.assertEqual(payload["dueDate"][:10], "2026-08-21", shape)
 
     def test_non_reminder_payloads_pass_through(self):
         lists = [{"title": "Work"}, {"title": "Home", "isGroup": True, "children": []}]
         self.assertEqual(_remctl._normalize_payload(lists), lists)
 
 
+class FrozenDatetime(dt.datetime):
+    """dt.datetime with now() pinned, so tests that compare against "now"
+    don't depend on when they run. Relative fixtures (now ± 1h) look
+    harmless but silently invert near midnight: at 23:30, "one hour in the
+    future" is 00:30, whose (hour, minute) sorts *below* the current time.
+    """
+
+    frozen = dt.datetime(2026, 8, 20, 12, 0, 0)
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.frozen
+
+
 class TodayRescheduleEligibility(unittest.TestCase):
+    NOON = FrozenDatetime.frozen
+
+    def setUp(self):
+        patcher = mock.patch.object(_remctl.dt, "datetime", FrozenDatetime)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _at(self, delta_hours):
-        return (dt.datetime.now() + dt.timedelta(hours=delta_hours)).replace(microsecond=0).isoformat()
+        return (self.NOON + dt.timedelta(hours=delta_hours)).isoformat()
 
     def test_future_time_allowed(self):
         self.assertTrue(today_reschedule_makes_sense({"dueDate": self._at(1), "allDay": False}))
 
     def test_past_time_refused(self):
         self.assertFalse(today_reschedule_makes_sense({"dueDate": self._at(-1), "allDay": False}))
+
+    def test_same_minute_refused(self):
+        self.assertFalse(today_reschedule_makes_sense({"dueDate": self._at(0), "allDay": False}))
+
+    def test_late_evening_does_not_wrap(self):
+        # 23:30 "now" against a 00:30 due time: the reminder is due early
+        # tomorrow, but transplanting its time onto *today* is still the
+        # past, so Today must stay refused.
+        FrozenDatetime.frozen = dt.datetime(2026, 8, 20, 23, 30)
+        self.addCleanup(setattr, FrozenDatetime, "frozen", self.NOON)
+        self.assertFalse(
+            today_reschedule_makes_sense({"dueDate": "2026-08-21T00:30:00", "allDay": False})
+        )
 
     def test_all_day_always_allowed(self):
         self.assertTrue(today_reschedule_makes_sense({"dueDate": self._at(-5), "allDay": True}))
@@ -104,9 +191,17 @@ class TodayRescheduleEligibility(unittest.TestCase):
 
 
 class DatePhrases(unittest.TestCase):
-    def test_out_of_range_times_rejected(self):
+    def test_out_of_range_times_raise(self):
+        # Not merely dropped: falling through to date-only would succeed
+        # as an all-day reminder while the confirm screen showed a time.
         for phrase in ("9/13 25:00", "9/13 99:99", "sep 9 13pm", "9/13 0:70"):
-            self.assertNotIn(":", normalize_date_phrase(phrase).split(" ", 1)[-1], phrase)
+            with self.assertRaises(InvalidDatePhrase, msg=phrase):
+                normalize_date_phrase(phrase)
+
+    def test_parse_keeps_invalid_time_visible_for_preview(self):
+        # parse() runs per keystroke, so it must not raise; it keeps the
+        # raw text so the preview shows what was typed.
+        self.assertEqual(parse("Pay rent /9/13 13pm")["due"], "9/13 13pm")
 
     def test_valid_times_kept(self):
         self.assertTrue(normalize_date_phrase("9/13 9am").endswith(" 09:00"))
@@ -214,6 +309,24 @@ class MultilineNotes(unittest.TestCase):
             ra.execute_quick_edit("1", "Title")
         edit = [c for c in calls if c[0] == "edit"][0]
         self.assertNotIn("-n", edit)
+
+    def test_execute_aborts_when_notes_lookup_fails(self):
+        # Failing open here would send -n "" and wipe a multi-line note —
+        # the exact loss the multi-line rule exists to prevent, in the one
+        # path the user can't see coming. Nothing may be written.
+        import reminder_action as ra
+        calls = []
+
+        def fake(args, json_output=True):
+            calls.append(args)
+            if args[0] == "info":
+                raise _remctl.RemctlError("transient failure")
+            return {}
+
+        with mock.patch.object(ra, "run", fake), mock.patch.object(ra, "notify"):
+            with self.assertRaises(SystemExit):
+                ra.execute_quick_edit("1", "Title")
+        self.assertEqual([c for c in calls if c[0] == "edit"], [])
 
     def test_execute_still_clears_single_line_notes(self):
         import reminder_action as ra

@@ -98,6 +98,15 @@ class RemctlError(RuntimeError):
         self.stderr = stderr
 
 
+class InvalidDatePhrase(RemctlError):
+    """A due phrase that parsed structurally but can't be a real time.
+
+    Subclasses RemctlError purely so the existing handlers — which already
+    wrap every mutation and render a visible error — pick it up without
+    each call site growing a second except clause.
+    """
+
+
 def _normalize_all_day_due(item):
     """Rewrite an all-day reminder's `dueDate` to local midnight on the day
     it's actually due.
@@ -560,13 +569,15 @@ def normalize_date_phrase(text):
             elif meridiem == "am" and hour == 12:
                 hour = 0
             # The regex only bounds digit *count*, not range, so "25:00",
-            # "0:70" and "13pm" (-> 25:00) all matched and were handed to
-            # remctl as-is, which then either errors obscurely or silently
-            # does something unintended. Reject an out-of-range time
-            # instead and keep scanning: better to fall through to
-            # date-only than to invent a wrong time.
+            # "0:70" and "13pm" (-> 25:00) all match. Handing those to
+            # remctl gets an obscure failure; silently dropping the time
+            # and falling through to date-only is worse still, because the
+            # add/reschedule then *succeeds* as an all-day reminder while
+            # the confirmation screen showed the time the user typed. Both
+            # quietly do something other than what was asked, so refuse
+            # outright and let the caller surface it.
             if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                continue
+                raise InvalidDatePhrase(f"“{w}” isn't a valid time of day.")
             time_24h = f"{hour:02d}:{minute:02d}"
             break
 

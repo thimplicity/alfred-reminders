@@ -131,11 +131,20 @@ def execute_quick_edit(reminder_id, typed_text):
     # -n "" (the normal clear-what's-absent behavior) would wipe it. The
     # check is recomputed from live state rather than trusted from render
     # time, so the two sides can't drift.
-    current_notes = ""
+    #
+    # A failed lookup aborts rather than assuming "no notes". Swallowing
+    # the error and defaulting to "" would treat a multi-line note as
+    # absent and send -n "", wiping it — reintroducing exactly the data
+    # loss the multi-line rule exists to prevent, in the one path where
+    # the user has no way to see it coming. Nothing has been written at
+    # this point, so aborting leaves the reminder untouched and the user
+    # can retry; every other field's semantics are unambiguous, but
+    # applying four of five fields silently is still a partial edit
+    # nobody asked for.
     try:
         current_notes = (run(["info", reminder_id], json_output=True) or {}).get("notes") or ""
-    except RemctlError:
-        pass
+    except RemctlError as exc:
+        fail("Couldn't read the reminder's current notes — quick edit cancelled.", str(exc))
     if not notes_are_multiline(current_notes):
         args += ["-n", parsed["notes"] or ""]
     args += ["--set-tags", ",".join(parsed["tags"])] if parsed["tags"] else ["--clear-tags"]
