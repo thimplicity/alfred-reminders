@@ -91,7 +91,7 @@ def escape_literal(text):
     return " ".join(("\\" + w if _is_marker_token(w) else w) for w in text.split())
 
 
-def parse(query, auto_detect_due=True):
+def parse(query, auto_detect_due=True, recognize_list=True):
     """`auto_detect_due=False` disables the trailing-due-phrase heuristic
     entirely (only an explicit `/phrase` or `due:phrase` marker sets a due
     date) — used by list_reminders.py's Quick edit… screen, which
@@ -104,6 +104,18 @@ def parse(query, auto_detect_due=True):
     typing "buy milk tomorrow" without a marker is the whole point there
     and the title is fresh input the user is actively composing, not
     existing data being blindly re-parsed.
+
+    `recognize_list=False` disables `@List` recognition entirely — also
+    used by Quick edit…, which has no list-changing slot to put a parsed
+    list name into (see _quick_edit_prefill()'s docstring for why `@List`
+    was dropped from that screen). escape_literal() protects *pre-filled*
+    `@word` text from being misread, but can't protect a brand new
+    `@word` the user types fresh during editing — verified directly
+    ("Call @alice instead" silently became title="Call instead" with the
+    mention discarded, since Quick edit's execution never reads the
+    parsed list value). With recognize_list=False, `@` is never treated
+    as a marker at all in this context, escaped or not, typed fresh or
+    not, so there's nothing left to protect against.
     """
     plain_tokens, due_words, notes_words, tags = [], [], [], []
     list_name = priority = None
@@ -125,7 +137,7 @@ def parse(query, auto_detect_due=True):
                 plain_tokens.append(literal)
             continue
         low = tok.lower()
-        if tok.startswith("@") and len(tok) > 1:
+        if recognize_list and tok.startswith("@") and len(tok) > 1:
             mode = None
             list_name = tok[1:]
             continue

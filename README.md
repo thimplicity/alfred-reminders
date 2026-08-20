@@ -268,7 +268,11 @@ The subtitle shows the same always-visible `#tag  ·  !priority  ·  /due
  ·  notes:` hint bar as `remadd`'s own preview while you type. There's
 no `@List` slot — deliberately excluded, since list-changing was removed
 as a feature (see "Known limitation" below) and reintroducing it through
-this back door would hit the identical bug. One important asymmetry
+this back door would hit the identical bug. `@` isn't just left
+unescaped-but-ignored either — Quick edit's parser doesn't recognize `@`
+as a marker at all, so typing a genuine "@" mention (fresh, not just one
+already in the title) stays literal instead of silently vanishing into a
+list-name slot nothing reads. One important asymmetry
 from `remadd`: here, a marker's *absence* means that field gets
 **cleared** on confirm (`-d clear`, `-p none`, `--clear-tags`, empty
 notes), not "leave unchanged" — safe specifically because the line
