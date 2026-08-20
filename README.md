@@ -205,32 +205,35 @@ The action menu, in order:
 1. **Mark as complete**
 2. **Reschedule…**
 3. **Change title…**
-4. **Set priority…**
-5. **Flag** / **Unflag** — label and target action switch based on the
+4. **Quick edit…** — title, tags, priority, due, and notes together in
+   one editable line, for changing several of them without repeating the
+   menu → field → confirm → re-navigate cycle for each one separately
+5. **Set priority…**
+6. **Flag** / **Unflag** — label and target action switch based on the
    reminder's current flagged state, computed fresh each time the menu
    renders (not a static label)
-6. **View details**
-7. **Open in Reminders.app**
+7. **View details**
+8. **Open in Reminders.app**
 
 There's deliberately no "Move to another list…" — see "Known
 limitation" below for why it was removed rather than left broken or
 worked around.
 
-Reschedule, change-title, set-priority, and view-details all need a
-follow-up value or more screen space than a modifier+Return can give (a
-modifier is a one-shot fire-and-forget action, not an interactive prompt
-or a second screen), which is why they live in the menu rather than on a
-modifier key. Flag/Unflag doesn't need a follow-up value — it's a
-same-shape one-shot action as Mark as complete (drills into confirm
+Reschedule, change-title, quick-edit, set-priority, and view-details all
+need a follow-up value or more screen space than a modifier+Return can
+give (a modifier is a one-shot fire-and-forget action, not an interactive
+prompt or a second screen), which is why they live in the menu rather
+than on a modifier key. Flag/Unflag doesn't need a follow-up value — it's
+a same-shape one-shot action as Mark as complete (drills into confirm
 first when `CONFIRM_CHANGES` is on, fires directly otherwise). Tab into
 the menu, then Tab again on "Reschedule…" / "Change title…" /
-"Set priority…" / "View details" drops you into a text-entry prompt,
-picker, or read-only detail screen — these are
+"Quick edit…" / "Set priority…" / "View details" drops you into a
+text-entry prompt, picker, or read-only detail screen — these are
 `valid: false` items, so only Tab reliably applies their `autocomplete`.
-Each of those screens (View details, Reschedule, Change title, Set
-priority…) also includes a **"← Back to actions"** row — Tab it to
-jump straight back to that reminder's action menu instead of retyping or
-backspacing, e.g. View details then straight into Reschedule without
+Each of those screens (View details, Reschedule, Change title, Quick
+edit…, Set priority…) also includes a **"← Back to actions"** row —
+Tab it to jump straight back to that reminder's action menu instead of
+retyping or backspacing, e.g. View details then straight into Reschedule without
 leaving the reminder. The action menu itself also has a **"← Back to
 results"** row, which re-renders the exact scope/search you drilled in
 from (`@Groceries`, a search term, plain `rem`, ...) rather than
@@ -256,6 +259,35 @@ the same Reminders.app icon used everywhere lists show up, Due the same
 Calendar icon as "Reschedule…") — see `VIEW_ICONS` in
 `scripts/list_reminders.py`.
 
+**Quick edit…** is one editable line covering title, `#tag`s,
+`!priority`, `/due`, and `notes:` together — the exact same syntax
+`remadd` uses (see below), prefilled with the reminder's current state
+(e.g. `Buy milk #errand !high /2026-09-08 11:00 notes:pick up eggs too`)
+so editing is "change what you want to change, leave the rest as-is."
+The subtitle shows the same always-visible `#tag  ·  !priority  ·  /due
+ ·  notes:` hint bar as `remadd`'s own preview while you type. There's
+no `@List` slot — deliberately excluded, since list-changing was removed
+as a feature (see "Known limitation" below) and reintroducing it through
+this back door would hit the identical bug. `@` isn't just left
+unescaped-but-ignored either — Quick edit's parser doesn't recognize `@`
+as a marker at all, so typing a genuine "@" mention (fresh, not just one
+already in the title) stays literal instead of silently vanishing into a
+list-name slot nothing reads. One important asymmetry
+from `remadd`: here, a marker's *absence* means that field gets
+**cleared** on confirm (`-d clear`, `-p none`, `--clear-tags`, empty
+notes), not "leave unchanged" — safe specifically because the line
+starts pre-filled with the current value, so deleting a marker is a
+visible, deliberate act. Multi-line notes get flattened to single-line
+on the way through, since Alfred's query bar can't hold literal
+newlines — for anything beyond a quick tweak to long notes, edit them in
+Reminders.app directly. If the reminder's own title or notes happen to
+contain something that looks like this syntax — a real title like "Email
+@alice" or "Discuss #release" — the prefill escapes it automatically
+(`escape_literal()` in `scripts/quick_add.py`) so it round-trips as plain
+text instead of being misread as new metadata (or, for `@`, silently
+discarded — Quick edit has no list-changing slot); you'll never see the
+escaping yourself unless you go looking at the raw query text mid-edit.
+
 **Set priority…** is a fixed 4-choice picker (None, Low, Medium, High)
 rather than free text — priority only has these values, so there's
 nothing to gain from typing one out over picking it, and it rules out
@@ -274,9 +306,12 @@ There's no delete anywhere in this workflow — use Reminders.app directly
 for that.
 
 **Confirmation step**: every mutation (Mark as complete, Reschedule,
-Change title, Set priority, Flag/Unflag) shows a one-line summary —
-"Mark 'Buy milk' as complete", "Set 'Buy milk''s priority to high" —
-that needs one more Return before it actually calls `remctl`. This is
+Change title, Quick edit, Set priority, Flag/Unflag) shows a one-line
+summary — "Mark 'Buy milk' as complete", "Set 'Buy milk''s priority to
+high" — that needs one more Return before it actually calls `remctl`.
+Quick edit's summary shows the full typed line verbatim rather than a
+short paraphrase, since it's the most direct way to confirm exactly
+what's about to be applied across several fields at once. This is
 on by default; set the `CONFIRM_CHANGES` workflow
 variable to `0` (Alfred's workflow configuration sheet, or edit
 `info.plist`'s top-level `variables` dict) to
@@ -411,12 +446,15 @@ A macOS notification confirms success or reports the failure.
 
 Two objects per keyword, one plain connection each — no modifier-gated
 routing anywhere. `list_reminders.py` handles browse, the Tab/Return
-action menu, the edit/reschedule/priority text-entry prompts and picker,
-the read-only details screen, *and* the confirm-step summary all in one
-script, branching on a prefix in the query string itself (`menu:<id>:<ret>`,
-`edit:<id>:<ret>:<text>`, `due:<id>:<ret>:<text>`, `priority:<id>:<ret>:<text>`,
+action menu, the edit/reschedule/priority/quickedit text-entry prompts
+and pickers, the read-only details screen, *and* the confirm-step
+summary all in one script, branching on a prefix in the query string
+itself (`menu:<id>:<ret>`, `edit:<id>:<ret>:<text>`, `due:<id>:<ret>:<text>`,
+`priority:<id>:<ret>:<text>`, `quickedit:<id>:<ret>:<text>`,
 `view:<id>:<ret>`, `confirm:<action>:<id>:<value>` — see the module
-docstring for what `<ret>` is).
+docstring for what `<ret>` is). `quickedit` reuses `quick_add.py`'s own
+`parse()` function directly rather than re-implementing the same syntax
+a second time.
 `quick_add_filter.py` similarly handles both the `@`/`#`/`!` live
 completion and the running preview, but never calls `remctl` itself — its
 one valid output item's `arg` is the full query text, unchanged, which is
@@ -478,6 +516,7 @@ python3 list_reminders.py "menu:23880:%40Work"              # action menu, "back
 python3 list_reminders.py "edit:23880:%40Work:New title"    # edit text-entry preview
 python3 list_reminders.py "due:23880:%40Work:tom 9am"       # reschedule text-entry preview (shows current due date too)
 python3 list_reminders.py "priority:23880:%40Work:hi"        # priority picker preview (filters to High)
+python3 list_reminders.py "quickedit:23880:%40Work:Buy milk #errand !high /tomorrow notes:pick up eggs"  # quick-edit preview, persistent hints
 python3 list_reminders.py "view:23880:%40Work"               # read-only detail screen, one icon per line
 python3 list_reminders.py "confirm:done:23880:"                    # confirm-step preview
 CONFIRM_CHANGES=0 python3 list_reminders.py "edit:23880:%40Work:New title"   # with confirm disabled
@@ -485,6 +524,7 @@ action=done reminder_id=23880 python3 reminder_action.py
 action=flag reminder_id=23880 python3 reminder_action.py     # via edit --private --flagged, not remctl flag
 action=unflag reminder_id=23880 python3 reminder_action.py
 action=priority reminder_id=23880 python3 reminder_action.py "high"
+action=quickedit reminder_id=23880 python3 reminder_action.py "Buy milk #errand !high /tomorrow notes:pick up eggs"
 python3 list_reminders.py "overdue today"              # bulk-reschedule confirm preview (read-only)
 action=bulk_reschedule_overdue target=today python3 reminder_action.py   # actually reschedules every overdue reminder — careful
 python3 quick_add.py "Buy milk @Groceries tomorrow 9am"

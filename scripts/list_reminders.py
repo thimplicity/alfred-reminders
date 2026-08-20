@@ -10,6 +10,9 @@ does the current query string look like":
   edit:<id>:<ret>:<text>    reached via the menu        -> retitle, typing <text>
   due:<id>:<ret>:<text>     reached via the menu        -> reschedule, typing <text>
   priority:<id>:<ret>:<text> reached via the menu       -> set priority, picking one
+  quickedit:<id>:<ret>:<text> reached via the menu      -> title/tags/priority/due/
+                              notes together, typing <text> (see
+                              render_quick_edit()'s docstring for syntax)
   view:<id>:<ret>     reached via the menu              -> read-only detail screen
   confirm:<action>:<id>:<value>  reached from a menu action or a filled-in
                        text entry/picker              -> one-line summary,
@@ -101,6 +104,7 @@ from _remctl import (
     reminders_app_icon,
     run,
 )
+from quick_add import escape_literal, parse as parse_quick_add
 
 CACHE_TTL = 5  # seconds; only applies to scope-level fetches, not free text
 # Computed once at import time rather than per-render — Reminders.app's
@@ -138,13 +142,15 @@ DUE_ICON = app_icon("/System/Applications/Calendar.app")
 # One icon per action-menu row, so the menu isn't a wall of identical
 # default icons — each keyed by the MENU_ACTIONS `action` or `drill_prefix`
 # (whichever is set). Beyond the bundled assets above, the rest borrow
-# other installed apps' Finder icons: TextEdit for retitling, and System
+# other installed apps' Finder icons: TextEdit for retitling, System
+# Settings for "adjust several things at once" (Quick edit…), and System
 # Information's icon for "more info about this." Those entries degrade to
 # no icon (Alfred's default) if the app they point at isn't installed.
 MENU_ICONS = {
     "done": MARK_COMPLETE_ICON,
     "due": DUE_ICON,
     "edit": app_icon("/System/Applications/TextEdit.app"),
+    "quickedit": app_icon("/System/Applications/System Settings.app"),
     "priority": PRIORITY_ICON,
     "flag": FLAG_ICON,
     "unflag": FLAG_ICON,
@@ -201,8 +207,9 @@ MENU_RE = re.compile(r"^menu:(\d+):(.*)$", re.DOTALL)
 EDIT_RE = re.compile(r"^edit:(\d+):([^:]*):(.*)$", re.DOTALL)
 DUE_RE = re.compile(r"^due:(\d+):([^:]*):(.*)$", re.DOTALL)
 PRIORITY_RE = re.compile(r"^priority:(\d+):([^:]*):(.*)$", re.DOTALL)
+QUICKEDIT_RE = re.compile(r"^quickedit:(\d+):([^:]*):(.*)$", re.DOTALL)
 VIEW_RE = re.compile(r"^view:(\d+):(.*)$", re.DOTALL)
-CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|flag|unflag|priority):(\d+):(.*)$", re.DOTALL)
+CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|flag|unflag|priority|quickedit):(\d+):(.*)$", re.DOTALL)
 
 
 def confirm_enabled():
@@ -570,16 +577,20 @@ def render_browse(query):
     return {"items": alfred_items}
 
 
-# Split into two lists (rather than one, with the flag toggle appended at
-# the end) purely so the flag toggle can be inserted between "Set
-# priority…" and "View details" in render_menu() — its label/action are
-# computed per-reminder (Flag vs Unflag) rather than fixed here, since a
-# static MENU_ACTIONS tuple has no way to know a specific reminder's
-# current flagged state at import time.
+# Split into three lists (rather than one, with Quick edit/flag appended
+# at the end) purely so those two can be inserted at specific points in
+# render_menu() — Quick edit's prefill is a custom multi-field string
+# built from live info (not a simple boolean prefill_title flag like
+# Change title's), and the flag toggle's label/action are computed
+# per-reminder (Flag vs Unflag) — neither fits a static MENU_ACTIONS
+# tuple, which has no way to know a specific reminder's current state at
+# import time.
 MENU_ACTIONS_MAIN = [
     ("Mark as complete", "done", None, None, False, True),
     ("Reschedule…", None, "due", "type a due date, e.g. tomorrow 9am", False, None),
     ("Change title…", None, "edit", "type a new title, or add #tag to tag it", True, None),
+]
+MENU_ACTIONS_PRIORITY = [
     ("Set priority…", None, "priority", "pick none, low, medium, or high", False, None),
 ]
 MENU_ACTIONS_TAIL = [
@@ -593,7 +604,7 @@ def _menu_action_item(entry, reminder_id, return_q, title):
     if action and needs_confirm and confirm_enabled():
         # "Mark as complete" is the only menu entry that both mutates
         # and fires with no further typing, so it's the only one that
-        # needs its own confirm drill-in here — edit/reschedule/priority
+        # needs its own confirm drill-in here — edit/reschedule/priority/quickedit
         # route through confirm from render_text_input()/
         # render_priority_picker() instead, once a value exists to show.
         return {
@@ -640,6 +651,65 @@ def _menu_action_item(entry, reminder_id, return_q, title):
     }
 
 
+def _due_prefill(info):
+    """A due date re-typeable into quick_add's own parser — not
+    humanize_due()'s "Overdue: Aug 1" style text, which isn't valid input
+    for it. ISO "YYYY-MM-DD[ HH:MM]" round-trips cleanly either way: an
+    all-day reminder gets the date only, matching how it was set.
+    """
+    due_iso = info.get("dueDate")
+    if not due_iso:
+        return None
+    try:
+        due_dt = dt.datetime.fromisoformat(due_iso)
+    except ValueError:
+        return None
+    if info.get("allDay"):
+        return due_dt.strftime("%Y-%m-%d")
+    return due_dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _quick_edit_prefill(info):
+    """Builds the same syntax remadd uses (title @List #tag !priority
+    /due notes:text) from a reminder's current state, minus @List —
+    deliberately excluded, since "move to another list" was removed as a
+    feature after remctl's own -l move consistently failed on this
+    machine (see README), and reintroducing list-changing through this
+    back door would hit the identical bug.
+
+    Title and notes go through escape_literal() — an *existing* title or
+    notes can legitimately contain "@alice", "#release", "!high", or
+    "notes:something" as ordinary words (someone else's reminder, or one
+    created via Siri/Reminders.app directly, not composed with this
+    grammar in mind), and without escaping, confirming this screen while
+    changing some unrelated field would silently reinterpret those words
+    as new metadata instead of leaving them alone — verified directly.
+    """
+    parts = [escape_literal(info.get("title") or "")]
+    for tag in info.get("tags") or []:
+        parts.append(f"#{tag}")
+    priority = info.get("priority")
+    if priority and priority != "none":
+        parts.append(f"!{priority}")
+    due_phrase = _due_prefill(info)
+    if due_phrase:
+        parts.append(f"/{due_phrase}")
+    notes = info.get("notes")
+    if notes:
+        # "notes:" and the escaped text are separate tokens, not fused
+        # into one via an f-string — if notes starts with a marker-shaped
+        # word ("#release details"), a fused "notes:\#release" would put
+        # the backslash inside the *same* token as the "notes:" prefix,
+        # where parse()'s leading-backslash unescape check never sees it
+        # (that check only fires on a token's own leading character, and
+        # here the leading character is "n"). Keeping "notes:" on its own
+        # lets the escaped first word start its own token instead, where
+        # the unescape check applies normally — verified directly.
+        parts.append("notes:")
+        parts.append(escape_literal(notes))
+    return " ".join(parts)
+
+
 def render_menu(reminder_id, return_q=""):
     """Actions only — no read-only detail lines mixed in here, so this
     stays a pure "what do you want to do" list; "View details" below is
@@ -657,6 +727,21 @@ def render_menu(reminder_id, return_q=""):
 
     title = info.get("title") or f"#{reminder_id}"
     items = [_menu_action_item(entry, reminder_id, return_q, title) for entry in MENU_ACTIONS_MAIN]
+
+    # Quick edit…: title/tags/priority/due/notes together in one editable
+    # line, prefilled with the reminder's current state in the same
+    # syntax remadd uses — for changing several fields at once without
+    # repeating the menu -> field -> confirm -> re-navigate cycle for
+    # each one individually.
+    items.append({
+        "title": "Quick edit…",
+        "subtitle": f"“{title}” — title, #tags, !priority, /due, notes: together",
+        "valid": False,
+        "autocomplete": f"quickedit:{reminder_id}:{return_q}:{_quick_edit_prefill(info)}",
+        **_menu_icon_kwargs("quickedit"),
+    })
+
+    items += [_menu_action_item(entry, reminder_id, return_q, title) for entry in MENU_ACTIONS_PRIORITY]
 
     # Flag/Unflag: same "action fires now, drilling into confirm first
     # when enabled" shape as Mark as complete, just with the label and the
@@ -775,6 +860,75 @@ def render_priority_picker(reminder_id, return_q, partial):
     ] + [_back_item(reminder_id, return_q)]}
 
 
+def render_quick_edit(reminder_id, return_q, typed_text):
+    """One editable line for title/tags/priority/due/notes together,
+    parsed with the exact same parser remadd uses (quick_add.parse()) so
+    the syntax is identical: #tag, !priority, /due (or due:), notes:. No
+    @List — see _quick_edit_prefill()'s docstring for why.
+
+    A marker's *absence* from the text means that field gets cleared on
+    confirm, not "leave unchanged" — this only works because the field
+    starts pre-filled with its current value (see _quick_edit_prefill()),
+    so what's on screen when you Tab in already represents "no change";
+    deleting a marker is a deliberate, visible act of removing it, mirrored
+    by execute_quick_edit() in reminder_action.py explicitly clearing
+    (`-d clear`, `-p none`, `--clear-tags`, `-n ""`) whatever's missing
+    rather than omitting flags that would leave old values untouched.
+    """
+    # auto_detect_due=False: this text starts as an *existing* title
+    # (from _quick_edit_prefill()), not fresh input — remadd's implicit
+    # due-phrase heuristic would silently reinterpret a title ending in a
+    # day-like word ("Review on Monday") as title="Review" due="on
+    # Monday" on every confirm, even when only some other field was being
+    # changed. Only an explicit /phrase or due: marker sets a due date
+    # here. recognize_list=False: Quick edit has no @List slot at all
+    # (see _quick_edit_prefill()'s docstring), so a fresh "@word" typed
+    # here — not just one already in the prefilled text — must stay
+    # literal too, not get silently parsed into a list name and dropped.
+    # preserve_boundary_whitespace=True: an existing note can legitimately
+    # start or end with whitespace (an indented first line) — confirming
+    # some unrelated field shouldn't silently trim that away. See
+    # parse()'s docstring in quick_add.py.
+    parsed = parse_quick_add(
+        typed_text, auto_detect_due=False, recognize_list=False, preserve_boundary_whitespace=True
+    )
+
+    # Same "always show all the slots" treatment as remadd's own preview,
+    # minus @list (not part of this screen's scope) — a slot switches
+    # from its placeholder to the real value as soon as it's set.
+    meta = [
+        " ".join(f"#{t}" for t in parsed["tags"]) if parsed["tags"] else "#tag",
+        f"!{parsed['priority']}" if parsed["priority"] else "!priority",
+        f"/{parsed['due']}" if parsed["due"] else "/due",
+        f"notes: {parsed['notes']}" if parsed["notes"] else "notes:",
+    ]
+    hint = "  ·  ".join(meta)
+
+    if not parsed["title"]:
+        return {"items": [{
+            "title": "No title yet",
+            "subtitle": f"Keep typing a title — {hint}",
+            "valid": False,
+        }, _back_item(reminder_id, return_q)]}
+
+    if confirm_enabled():
+        item = {
+            "title": parsed["title"],
+            "subtitle": f"Tab to review before confirming — {hint}",
+            "valid": False,
+            "autocomplete": f"confirm:quickedit:{reminder_id}:{typed_text}",
+        }
+    else:
+        item = {
+            "title": parsed["title"],
+            "subtitle": f"↩ to confirm — {hint}",
+            "arg": typed_text,
+            "valid": True,
+            "variables": {"action": "quickedit", "reminder_id": reminder_id},
+        }
+    return {"items": [item, _back_item(reminder_id, return_q)]}
+
+
 def render_confirm(action, reminder_id, value):
     try:
         info = run(["info", reminder_id], json_output=True)
@@ -789,6 +943,7 @@ def render_confirm(action, reminder_id, value):
         "flag": f"Flag “{title}”",
         "unflag": f"Unflag “{title}”",
         "priority": f"Set “{title}”'s priority to {value}",
+        "quickedit": f"Update “{title}”: {value}",
     }
     item = {
         "title": summary_by_action.get(action, f"{action} “{title}”"),
@@ -867,6 +1022,12 @@ def main():
     if priority_match:
         reminder_id, return_q, typed = priority_match.group(1), priority_match.group(2), priority_match.group(3)
         print(json.dumps(render_priority_picker(reminder_id, return_q, typed)))
+        return
+
+    quickedit_match = QUICKEDIT_RE.match(query)
+    if quickedit_match:
+        reminder_id, return_q, typed = quickedit_match.group(1), quickedit_match.group(2), quickedit_match.group(3)
+        print(json.dumps(render_quick_edit(reminder_id, return_q, typed)))
         return
 
     view_match = VIEW_RE.match(query)
