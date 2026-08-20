@@ -28,14 +28,17 @@ def clear_cache():
             pass
 
 
-def _due_for_bulk_reschedule(item, target):
+def _due_preserving_time(item, target):
     """Only the *day* moves — a reminder due at 9am stays due at 9am, just
-    on `target` instead of whenever it was overdue from. An all-day
-    reminder (no specific time) stays all-day. remctl accepts "today
-    HH:MM" / "tomorrow HH:MM" directly (verified against `remctl add -d`),
-    so the original time is read straight off dueDate and reattached
-    rather than dropped — passing a bare "today"/"tomorrow" would silently
-    strip any existing time and turn a timed reminder into an all-day one.
+    on `target` ("today" or "tomorrow") instead of wherever it was
+    scheduled before. An all-day reminder (no specific time) stays
+    all-day. remctl accepts "today HH:MM" / "tomorrow HH:MM" directly
+    (verified against `remctl add -d`), so the original time is read
+    straight off dueDate and reattached rather than dropped — passing a
+    bare "today"/"tomorrow" would silently strip any existing time and
+    turn a timed reminder into an all-day one. Used both for the overdue
+    bulk-reschedule action and the single-reminder "Reschedule to
+    today"/"tomorrow" shortcuts on the View details screen.
     """
     if item.get("allDay"):
         return target
@@ -67,7 +70,7 @@ def bulk_reschedule_overdue(target):
     for item in items:
         reminder_id = str(item.get("id"))
         try:
-            run(["edit", reminder_id, "-d", _due_for_bulk_reschedule(item, target)], json_output=False)
+            run(["edit", reminder_id, "-d", _due_preserving_time(item, target)], json_output=False)
             succeeded += 1
         except RemctlError as exc:
             failures.append(f'{item.get("title") or reminder_id}: {exc}')
@@ -182,6 +185,10 @@ def main():
                 print("No date entered — reschedule cancelled.", file=sys.stderr)
                 sys.exit(1)
             run(["edit", reminder_id, "-d", normalize_date_phrase(typed_text)], json_output=False)
+        elif action in ("reschedule_today", "reschedule_tomorrow"):
+            target = "today" if action == "reschedule_today" else "tomorrow"
+            info = run(["info", reminder_id], json_output=True)
+            run(["edit", reminder_id, "-d", _due_preserving_time(info, target)], json_output=False)
         elif action == "flag":
             # `remctl flag <id>` (AppleScript UI automation) needs
             # Reminders.app frontmost to respond at all — verified

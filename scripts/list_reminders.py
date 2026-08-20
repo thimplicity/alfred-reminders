@@ -13,7 +13,11 @@ does the current query string look like":
   quickedit:<id>:<ret>:<text> reached via the menu      -> title/tags/priority/due/
                               notes together, typing <text> (see
                               render_quick_edit()'s docstring for syntax)
-  view:<id>:<ret>     reached via the menu              -> read-only detail screen
+  view:<id>:<ret>     reached via the menu              -> read-only detail
+                              screen, plus two quick "reschedule to
+                              today/tomorrow" actions below the read-only
+                              lines (time-of-day preserving, see
+                              reminder_action.py's _due_preserving_time())
   confirm:<action>:<id>:<value>  reached from a menu action or a filled-in
                        text entry/picker              -> one-line summary,
                        one more Return actually executes it (skip via the
@@ -209,7 +213,7 @@ DUE_RE = re.compile(r"^due:(\d+):([^:]*):(.*)$", re.DOTALL)
 PRIORITY_RE = re.compile(r"^priority:(\d+):([^:]*):(.*)$", re.DOTALL)
 QUICKEDIT_RE = re.compile(r"^quickedit:(\d+):([^:]*):(.*)$", re.DOTALL)
 VIEW_RE = re.compile(r"^view:(\d+):(.*)$", re.DOTALL)
-CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|flag|unflag|priority|quickedit):(\d+):(.*)$", re.DOTALL)
+CONFIRM_RE = re.compile(r"^confirm:(done|edit|reschedule|reschedule_today|reschedule_tomorrow|flag|unflag|priority|quickedit):(\d+):(.*)$", re.DOTALL)
 
 
 def confirm_enabled():
@@ -814,6 +818,34 @@ def render_view(reminder_id, return_q=""):
         }
         for label, value in lines
     ]
+
+    # Quick reschedule shortcuts — same time-of-day-preserving logic as
+    # the overdue bulk-reschedule action (_due_preserving_time() in
+    # reminder_action.py), just for this one reminder instead of every
+    # currently-overdue one. Appended after the detail lines (not first),
+    # same reasoning as Back below — these are real mutations, so they
+    # go through the normal confirm step like any other single-item
+    # action (unlike bulk reschedule, which always confirms regardless).
+    for label, target in (("Reschedule to today", "today"), ("Reschedule to tomorrow", "tomorrow")):
+        action = f"reschedule_{target}"
+        if confirm_enabled():
+            items.append({
+                "title": label,
+                "subtitle": f"“{title}” — review before confirming",
+                "valid": False,
+                "autocomplete": f"confirm:{action}:{reminder_id}:",
+                **_menu_icon_kwargs("due"),
+            })
+        else:
+            items.append({
+                "title": label,
+                "subtitle": f"“{title}”",
+                "arg": reminder_id,
+                "valid": True,
+                "variables": {"action": action, "reminder_id": reminder_id, "reminder_title": title},
+                **_menu_icon_kwargs("due"),
+            })
+
     items.append(_back_item(reminder_id, return_q))
     return {"items": items}
 
@@ -936,10 +968,14 @@ def render_confirm(action, reminder_id, value):
         return {"items": [{"title": "remctl error", "subtitle": str(exc), "valid": False}]}
 
     title = info.get("title") or f"#{reminder_id}"
+    has_time = bool(info.get("dueDate")) and not info.get("allDay")
+    time_note = " (keeping the time)" if has_time else ""
     summary_by_action = {
         "done": f"Mark “{title}” as complete",
         "edit": f"Change “{title}”'s title to “{value}”",
         "reschedule": f"Reschedule “{title}” to “{value}”",
+        "reschedule_today": f"Reschedule “{title}” to today{time_note}",
+        "reschedule_tomorrow": f"Reschedule “{title}” to tomorrow{time_note}",
         "flag": f"Flag “{title}”",
         "unflag": f"Unflag “{title}”",
         "priority": f"Set “{title}”'s priority to {value}",
