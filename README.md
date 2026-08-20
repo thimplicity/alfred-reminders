@@ -137,10 +137,9 @@ cd remctl
 
 `remctl doctor` will tell you if anything's missing.
 
-**2. Import the workflow.**
+**2. Import the workflow into Alfred.**
 
-**3. Grant permissions — to Alfred, not to Terminal.** This is the step
-that trips people up. The grants are per-*process*, so remctl working in
+**3. Grant permissions — to Alfred, not to Terminal.** The grants are per-*process*, so remctl working in
 your shell says nothing about whether Alfred can use it. You need two:
 
 - **Reminders access** — trigger `rem` once and approve the macOS prompt.
@@ -160,14 +159,12 @@ All optional, in the workflow's configuration sheet:
 
 | Setting | Default | |
 |---|---|---|
-| `CONFIRM_CHANGES` | on | Review every change before it's applied. Set to `0` to skip straight to acting. |
+| `CONFIRM_CHANGES` | on | Review every change before it's applied. Set to `0` to skip the review step. |
 | `DEFAULT_SCOPE` | today + overdue | What bare `rem` shows. Set to `@Work`, `upcoming 14`, `flagged`, anything from the table above. |
 | `REMCTL_CACHE_TTL` | 5 | Seconds to reuse results while typing. |
 | `REMCTL_PATH` | auto | Only if remctl isn't on the usual paths. |
 
 ## Limitations
-
-Worth knowing before you install:
 
 **No "move to another list."** It was built, but `remctl`'s underlying
 move fails with an EventKit error (`-3002`) on at least one machine,
