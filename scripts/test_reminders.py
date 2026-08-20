@@ -26,20 +26,35 @@ from _remctl import (
 from quick_add import escape_literal, notes_are_multiline, parse
 
 
+# POSIX TZ specifications rather than zoneinfo names ("US/Eastern"). A
+# named zone needs a tz database on the host, and slim container images
+# routinely ship without one — worse, time.tzset() accepts an unavailable
+# name *silently*, leaving conversions in UTC, so tests written against a
+# named zone don't error out, they just quietly assert the wrong thing.
+# A POSIX spec carries its own offset and DST rules, so it needs no
+# database at all. Verified to produce the right offsets on both sides of
+# a DST boundary; check_offset() below still confirms it actually took.
+TZ_EASTERN = "EST5EDT,M3.2.0,M11.1.0"
+TZ_PACIFIC = "PST8PDT,M3.2.0,M11.1.0"
+TZ_UTC = "UTC0"
+TZ_BERLIN = "CET-1CEST,M3.5.0,M10.5.0/3"
+TZ_TOKYO = "JST-9"
+TZ_KOLKATA = "IST-5:30"  # half-hour offset, no DST
+
+
 @contextlib.contextmanager
-def fixed_timezone(name):
+def fixed_timezone(posix_tz):
     """Pin the process timezone for the duration of the block.
 
     _normalize_all_day_due() converts naive timestamps using the host's
-    local zone, so any fixture written as a literal string only means what
+    local zone, so a fixture written as a literal string only means what
     it's supposed to mean in the zone it was captured in. An earlier
     version of this file hardcoded values captured in US/Eastern and
-    failed four tests on a UTC machine (and in US/Pacific) — the suite
-    advertises itself as dependency-free and portable, so it has to
-    actually be both.
+    failed on UTC hosts; the version after that pinned the zone by *name*
+    and still failed wherever that name wasn't installed.
     """
     previous = os.environ.get("TZ")
-    os.environ["TZ"] = name
+    os.environ["TZ"] = posix_tz
     time.tzset()
     try:
         yield
@@ -49,6 +64,23 @@ def fixed_timezone(name):
         else:
             os.environ["TZ"] = previous
         time.tzset()
+
+
+def local_utcoffset(naive_when):
+    return naive_when.astimezone().utcoffset()
+
+
+def check_offset(test, naive_when, expected_hours):
+    """Skip rather than fail if the platform didn't honour the TZ spec.
+
+    tzset() reports nothing when it can't apply a value, so without an
+    explicit check a test that *thinks* it's in Eastern silently runs in
+    UTC and asserts nonsense. A skip says "couldn't verify here"; a
+    failure would claim the code is broken when it isn't.
+    """
+    actual = local_utcoffset(naive_when)
+    if actual != dt.timedelta(hours=expected_hours):
+        test.skipTest(f"platform ignored the POSIX TZ spec (offset {actual}, wanted {expected_hours}h)")
 
 
 def remctl_style_all_day(target_date):
@@ -67,9 +99,11 @@ class AllDayNormalization(unittest.TestCase):
 
     def test_recovers_true_date_in_any_timezone(self):
         # Derived rather than hardcoded, so this holds east of UTC
-        # (Europe/Berlin), west of it (US/Pacific), and at it — where the
-        # correction is correctly a no-op.
-        for zone in ("US/Eastern", "US/Pacific", "UTC", "Europe/Berlin", "Asia/Tokyo"):
+        # (Berlin, Tokyo), west of it (Eastern, Pacific), at it, and on a
+        # half-hour offset — and needs no assumption about which of them
+        # actually applied, since the fixture is built in whatever zone
+        # ends up active.
+        for zone in (TZ_EASTERN, TZ_PACIFIC, TZ_UTC, TZ_BERLIN, TZ_TOKYO, TZ_KOLKATA):
             with fixed_timezone(zone):
                 for target in (dt.date(2026, 8, 21), dt.date(2026, 11, 26), dt.date(2027, 1, 1)):
                     item = {"allDay": True, "dueDate": remctl_style_all_day(target)}
@@ -78,9 +112,12 @@ class AllDayNormalization(unittest.TestCase):
 
     def test_real_captured_eastern_fixtures(self):
         # The actual strings observed from remctl on the machine this was
-        # found on, cross-checked against EventKit — pinned to the zone
-        # they were captured in so they stay meaningful anywhere.
-        with fixed_timezone("US/Eastern"):
+        # found on, cross-checked against EventKit. These are literal, so
+        # they only mean anything at UTC-4/-5 — verify the spec really
+        # applied instead of asserting against a silent UTC fallback.
+        with fixed_timezone(TZ_EASTERN):
+            check_offset(self, dt.datetime(2026, 8, 20, 12), -4)
+            check_offset(self, dt.datetime(2026, 11, 25, 12), -5)
             for raw, expected in (("2026-08-20T20:00:00", "2026-08-21"),   # EDT, UTC-4
                                   ("2026-11-25T19:00:00", "2026-11-26")):  # EST, UTC-5
                 item = {"allDay": True, "dueDate": raw}
@@ -88,13 +125,15 @@ class AllDayNormalization(unittest.TestCase):
                 self.assertEqual(item["dueDate"][:10], expected)
 
     def test_normalized_to_local_midnight(self):
-        with fixed_timezone("US/Eastern"):
-            item = {"allDay": True, "dueDate": "2026-08-20T20:00:00"}
-            _normalize_all_day_due(item)
-            self.assertTrue(item["dueDate"].endswith("T00:00:00"))
+        # Derived, so this needs no particular zone to be installed.
+        for zone in (TZ_EASTERN, TZ_UTC, TZ_KOLKATA):
+            with fixed_timezone(zone):
+                item = {"allDay": True, "dueDate": remctl_style_all_day(dt.date(2026, 8, 21))}
+                _normalize_all_day_due(item)
+                self.assertTrue(item["dueDate"].endswith("T00:00:00"), zone)
 
     def test_idempotent(self):
-        for zone in ("US/Eastern", "UTC", "Asia/Tokyo"):
+        for zone in (TZ_EASTERN, TZ_UTC, TZ_TOKYO):
             with fixed_timezone(zone):
                 item = {"allDay": True, "dueDate": remctl_style_all_day(dt.date(2026, 8, 21))}
                 _normalize_all_day_due(item)
@@ -118,7 +157,7 @@ class AllDayNormalization(unittest.TestCase):
         self.assertIsNone(item.get("dueDate"))
 
     def test_payload_shapes(self):
-        with fixed_timezone("US/Eastern"):
+        with fixed_timezone(TZ_EASTERN):
             raw = remctl_style_all_day(dt.date(2026, 8, 21))
             as_list = _remctl._normalize_payload([{"allDay": True, "dueDate": raw}])
             as_wrapped = _remctl._normalize_payload({"items": [{"allDay": True, "dueDate": raw}]})
