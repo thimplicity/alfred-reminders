@@ -11,7 +11,7 @@ does the current query string look like":
   reschedule_picker:<id>:<ret> reached via the menu     -> Today/Tomorrow/Pick a
                               date… (Today omitted when the reminder's own
                               time has already passed today — see
-                              _today_reschedule_makes_sense())
+                              today_reschedule_makes_sense() in _remctl.py)
   due:<id>:<ret>:<text>     reached via reschedule_picker's "Pick a date…"
                               (or directly, from confirm/quickedit)  ->
                               reschedule, typing <text>
@@ -110,6 +110,7 @@ from _remctl import (
     normalize_date_phrase,
     reminders_app_icon,
     run,
+    today_reschedule_makes_sense,
 )
 from quick_add import escape_literal, parse as parse_quick_add
 
@@ -719,26 +720,6 @@ def _quick_edit_prefill(info):
     return " ".join(parts)
 
 
-def _today_reschedule_makes_sense(info):
-    """False when offering "Today" would be a trap: a reminder with a
-    specific time whose time-of-day has already passed today would go
-    straight back to overdue the moment it's rescheduled, since Today/
-    Tomorrow preserve the existing time of day rather than dropping it
-    (see _due_preserving_time() in reminder_action.py) — silently
-    defeating the whole point of using this action to clear an overdue
-    reminder. Always True for an all-day reminder (no time to compare
-    against) or one with no due date yet at all (nothing to preserve).
-    """
-    if info.get("allDay") or not info.get("dueDate"):
-        return True
-    try:
-        due_dt = dt.datetime.fromisoformat(info["dueDate"])
-    except ValueError:
-        return True
-    now = dt.datetime.now()
-    return (due_dt.hour, due_dt.minute) > (now.hour, now.minute)
-
-
 def _reschedule_quick_item(label, action, reminder_id, title):
     if confirm_enabled():
         return {
@@ -760,12 +741,15 @@ def _reschedule_quick_item(label, action, reminder_id, title):
 
 def render_reschedule_picker(reminder_id, return_q):
     """"Reschedule…"'s own picker, reached via Tab/Return from the action
-    menu: Today (omitted — see _today_reschedule_makes_sense() — when the
-    reminder has a specific time that's already passed today), Tomorrow,
-    or "Pick a date…" (drills into the existing free-text due-entry
-    screen, same as before this picker existed). Today/Tomorrow both
-    preserve the reminder's existing time of day exactly like the bulk
-    overdue-reschedule action.
+    menu: Today (omitted — see today_reschedule_makes_sense() in
+    _remctl.py — when the reminder has a specific time that's already
+    passed today), Tomorrow, or "Pick a date…" (drills into the existing
+    free-text due-entry screen, same as before this picker existed).
+    Today/Tomorrow both preserve the reminder's existing time of day
+    exactly like the bulk overdue-reschedule action. This is only the
+    render-time check — reminder_action.py revalidates independently
+    right before actually executing reschedule_today, since confirm can
+    add a real gap between this render and execution.
     """
     try:
         info = run(["info", reminder_id], json_output=True)
@@ -774,7 +758,7 @@ def render_reschedule_picker(reminder_id, return_q):
 
     title = info.get("title") or f"#{reminder_id}"
     items = []
-    if _today_reschedule_makes_sense(info):
+    if today_reschedule_makes_sense(info):
         items.append(_reschedule_quick_item("Today", "reschedule_today", reminder_id, title))
     items.append(_reschedule_quick_item("Tomorrow", "reschedule_tomorrow", reminder_id, title))
     items.append({
